@@ -12,5 +12,5 @@ Because AdaptiveCPP uses clspv toolchain , which is not easy to use and embed.
 Also I was in charge of AdaptiveCPP pack in xmake and I temporarily have no time to finish clspv toolchain integration . 
 If you wish to fully use AdaptiveCPP , it's welcome to pr to xmake-repo and here!
 
-## How can we sure about that your project is not a tool
+## How can we sure about that your project is not a toy
 For one who is very serious about correctness , I build the whole test pipeline , and support coverage computing . 
