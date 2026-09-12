@@ -1,0 +1,39 @@
+#version 450
+// det(A) via Gaussian elimination with partial pivoting, single invocation.
+// Writes one float to c[0]; singular -> 0. Dispatch groups: (1,1,1).
+layout(local_size_x = 1) in;
+
+layout(std430, binding = 0) readonly buffer BufIn { float a[]; };
+layout(std430, binding = 1) writeonly buffer BufOut { float c[]; };
+layout(std430, binding = 2) readonly buffer Params { int n; };
+
+void main() {
+    const int MAXN = 32;
+    if (n <= 0 || n > MAXN) { c[0] = 0.0; return; }
+    float m[MAXN * MAXN];
+    for (int i = 0; i < n * n; ++i) m[i] = a[i];
+    float det = 1.0;
+    for (int k = 0; k < n; ++k) {
+        int p = k;
+        float best = abs(m[k * n + k]);
+        for (int r = k + 1; r < n; ++r) {
+            float v = abs(m[r * n + k]);
+            if (v > best) { best = v; p = r; }
+        }
+        if (best < 1e-30) { c[0] = 0.0; return; }
+        if (p != k) {
+            for (int j = 0; j < n; ++j) {
+                float t = m[k * n + j];
+                m[k * n + j] = m[p * n + j];
+                m[p * n + j] = t;
+            }
+            det = -det;
+        }
+        det *= m[k * n + k];
+        for (int r = k + 1; r < n; ++r) {
+            float f = m[r * n + k] / m[k * n + k];
+            for (int j = k; j < n; ++j) m[r * n + j] -= f * m[k * n + j];
+        }
+    }
+    c[0] = det;
+}

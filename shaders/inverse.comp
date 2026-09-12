@@ -1,0 +1,48 @@
+#version 450
+// C = A^-1 via Gauss-Jordan elimination with partial pivoting, in a single
+// invocation (mirrors the SYCL single_task kernel). Singular input -> zeros.
+// Dispatch groups: (1,1,1). MAXN caps the augmented-matrix local array.
+layout(local_size_x = 1) in;
+
+layout(std430, binding = 0) readonly buffer BufIn { float a[]; };
+layout(std430, binding = 1) writeonly buffer BufOut { float c[]; };
+layout(std430, binding = 2) readonly buffer Params { int n; };
+
+void main() {
+    const int MAXN = 32;
+    if (n <= 0 || n > MAXN) return;
+    float aug[MAXN * 2 * MAXN]; // [n][2n] row-major: A | I
+    for (int i = 0; i < n; ++i)
+        for (int j = 0; j < n; ++j) {
+            aug[i * 2 * MAXN + j] = a[i * n + j];
+            aug[i * 2 * MAXN + n + j] = (i == j) ? 1.0 : 0.0;
+        }
+    for (int k = 0; k < n; ++k) {
+        int p = k;
+        float best = abs(aug[k * 2 * MAXN + k]);
+        for (int r = k + 1; r < n; ++r) {
+            float v = abs(aug[r * 2 * MAXN + k]);
+            if (v > best) { best = v; p = r; }
+        }
+        if (best < 1e-30) { // singular
+            for (int i = 0; i < n; ++i)
+                for (int j = 0; j < n; ++j) c[i * n + j] = 0.0;
+            return;
+        }
+        if (p != k)
+            for (int j = 0; j < 2 * n; ++j) {
+                float t = aug[k * 2 * MAXN + j];
+                aug[k * 2 * MAXN + j] = aug[p * 2 * MAXN + j];
+                aug[p * 2 * MAXN + j] = t;
+            }
+        float piv = aug[k * 2 * MAXN + k];
+        for (int j = 0; j < 2 * n; ++j) aug[k * 2 * MAXN + j] /= piv;
+        for (int r = 0; r < n; ++r) {
+            if (r == k) continue;
+            float f = aug[r * 2 * MAXN + k];
+            for (int j = 0; j < 2 * n; ++j) aug[r * 2 * MAXN + j] -= f * aug[k * 2 * MAXN + j];
+        }
+    }
+    for (int i = 0; i < n; ++i)
+        for (int j = 0; j < n; ++j) c[i * n + j] = aug[i * 2 * MAXN + n + j];
+}
