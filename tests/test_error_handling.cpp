@@ -53,6 +53,7 @@ public:
         test_zero_vector_length();
         test_zero_vector_normalize();
         test_singular_matrix();
+        test_zero_matrix_inverse();
         test_matrix_division();
         test_scalar_division_by_zero();
         test_vector_division_by_zero();
@@ -106,6 +107,17 @@ private:
         assert_true(matrix_is_zero(product), "A * A^-1(singular) -> zero");
 
         std::cout << "  ✓ Singular matrix test passed" << std::endl;
+    }
+
+    void test_zero_matrix_inverse() {
+        std::cout << "Testing zero matrix inverse..." << std::endl;
+
+        // 全零矩阵: scale == 0 提前出口, 契约仍为返回零矩阵
+        Matd<2, 2> zero({{0.0, 0.0}, {0.0, 0.0}});
+        Matd<2, 2> inv = inverse(zero);
+        assert_true(matrix_is_zero(inv), "inverse of zero matrix -> zero matrix");
+
+        std::cout << "  ✓ Zero matrix inverse test passed" << std::endl;
     }
 
     void test_matrix_division() {
@@ -253,7 +265,7 @@ private:
     }
 };
 
-int main(int argc, char** argv) {
+int main() {
     TestRunner runner;
 
     runner.add_suite(std::make_unique<ErrorHandlingTestSuite>());

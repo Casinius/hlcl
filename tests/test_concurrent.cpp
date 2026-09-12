@@ -272,7 +272,7 @@ private:
     }
 };
 
-int main(int argc, char** argv) {
+int main() {
     TestRunner runner;
 
     runner.add_suite(std::make_unique<ConcurrentTestSuite>());

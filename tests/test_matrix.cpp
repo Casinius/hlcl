@@ -1,3 +1,6 @@
+// release 模式构建 (xmake 定义 NDEBUG) 下 assert 会被编译剔除;
+// 测试断言必须始终生效, 故先取消 NDEBUG。
+#undef NDEBUG
 #include "hlcl/core.hpp"
 #include <cassert>
 #include <iostream>
@@ -41,7 +44,7 @@ void test_matrix_arithmetic() {
     M2(1, 0) = 7.0f; M2(1, 1) = 8.0f;
 
     // 加法
-    Mat<2, 2> M3 = M1 + M2;
+    [[maybe_unused]] Mat<2, 2> M3 = M1 + M2;
     assert(M3(0, 0) == 6.0f);
     assert(M3(0, 1) == 8.0f);
     assert(M3(1, 0) == 10.0f);
@@ -49,7 +52,7 @@ void test_matrix_arithmetic() {
     std::cout << "  ✓ Addition works" << std::endl;
 
     // 减法
-    Mat<2, 2> M4 = M1 - M2;
+    [[maybe_unused]] Mat<2, 2> M4 = M1 - M2;
     assert(M4(0, 0) == -4.0f);
     assert(M4(0, 1) == -4.0f);
     assert(M4(1, 0) == -4.0f);
@@ -57,7 +60,7 @@ void test_matrix_arithmetic() {
     std::cout << "  ✓ Subtraction works" << std::endl;
 
     // 标量乘法
-    Mat<2, 2> M5 = 2.0f * M1;
+    [[maybe_unused]] Mat<2, 2> M5 = 2.0f * M1;
     assert(M5(0, 0) == 2.0f);
     assert(M5(0, 1) == 4.0f);
     assert(M5(1, 0) == 6.0f);
@@ -65,7 +68,7 @@ void test_matrix_arithmetic() {
     std::cout << "  ✓ Scalar multiplication works" << std::endl;
 
     // 矩阵乘法
-    Mat<2, 2> M6 = M1 * M2;
+    [[maybe_unused]] Mat<2, 2> M6 = M1 * M2;
     assert(M6(0, 0) == 19.0f);
     assert(M6(0, 1) == 22.0f);
     assert(M6(1, 0) == 43.0f);
@@ -132,12 +135,12 @@ void test_matrix_stats() {
     std::cout << "  ✓ Max/Min works" << std::endl;
 
     // 范数
-    float norm = M1.norm();
+    [[maybe_unused]] float norm = M1.norm();
     assert(std::abs(norm - 5.477226f) < 1e-5f);
     std::cout << "  ✓ Norm works" << std::endl;
 
     // 平方范数
-    float sqNorm = M1.squaredNorm();
+    [[maybe_unused]] float sqNorm = M1.squaredNorm();
     assert(std::abs(sqNorm - 30.0f) < 1e-5f);
     std::cout << "  ✓ Squared norm works" << std::endl;
 
@@ -153,7 +156,7 @@ void test_matrix_transpose() {
     M1(0, 0) = 1.0f; M1(0, 1) = 2.0f; M1(0, 2) = 3.0f;
     M1(1, 0) = 4.0f; M1(1, 1) = 5.0f; M1(1, 2) = 6.0f;
 
-    Mat<3, 2> M1_T = transpose(M1);
+    [[maybe_unused]] Mat<3, 2> M1_T = transpose(M1);
 
     assert(M1_T.rows() == 3);
     assert(M1_T.cols() == 2);
@@ -173,7 +176,7 @@ void test_matrix_special() {
     std::cout << "Testing special matrices..." << std::endl;
 
     // 单位矩阵
-    Mat<3, 3> I = identity<float, 3>();
+    [[maybe_unused]] Mat<3, 3> I = identity<float, 3>();
     for (int i = 0; i < 3; ++i) {
         for (int j = 0; j < 3; ++j) {
             assert((i == j) ? I(i, j) == 1.0f : I(i, j) == 0.0f);
@@ -183,7 +186,7 @@ void test_matrix_special() {
 
     // 对角矩阵
     Vec<3> diag({1.0f, 2.0f, 3.0f});
-    Mat<3, 3> D = diagonal_matrix(diag);
+    [[maybe_unused]] Mat<3, 3> D = diagonal_matrix(diag);
     assert(D(0, 0) == 1.0f);
     assert(D(1, 1) == 2.0f);
     assert(D(2, 2) == 3.0f);

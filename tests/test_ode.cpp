@@ -1,3 +1,6 @@
+// release 模式构建 (xmake 定义 NDEBUG) 下 assert 会被编译剔除;
+// 测试断言必须始终生效, 故先取消 NDEBUG。
+#undef NDEBUG
 #include "hlcl/core.hpp"
 #include <cassert>
 #include <iostream>
@@ -10,14 +13,11 @@ void test_ode_implementation() {
 
     // solveEuler/solveHeun/solveRK4 的存在性由下方编译期调用保证
     std::cout << "  ✓ ODE solver API available" << std::endl;
-    
-    // solveEuler/solveHeun/solveRK4 的存在性由下方编译期调用保证
-    std::cout << "  ✓ ODE solver API available" << std::endl;
 
     // 测试简单的线性 ODE: dx/dt = 2*x
     class SimpleODE : public ODESolver<Float32, 1> {
     protected:
-        Float32 computeDerivative(Float32 t, const State& x) const override {
+        Float32 computeDerivative([[maybe_unused]] Float32 t, const State& x) const override {
             return 2.0f * x[0];  // dx/dt = 2x
         }
     };
@@ -37,10 +37,15 @@ void test_ode_implementation() {
     assert(std::abs(x_rk4[0] - 1.22140) < 1e-3f);
     std::cout << "  ✓ RK4 method works" << std::endl;
 
+    // Heun (二阶): x1 = x0 + dt/2*(k1 + k2) = 1.22, 精确值 exp(0.2) ≈ 1.22140
+    Vec<1> x_heun = simple_ode.solveHeun(0.0f, x0, 0.1f);
+    assert(std::abs(x_heun[0] - 1.22140) < 1e-2f);
+    std::cout << "  ✓ Heun method works" << std::endl;
+
     // 测试解包/打包函数
     class PositionVelocityODE : public ODESolver<Float32, 3> {
     protected:
-        Float32 computeDerivative(Float32 t, const State& x) const override {
+        Float32 computeDerivative([[maybe_unused]] Float32 t, const State& x) const override {
             // x[0] = px, x[1] = py (positions)
             // x[2] = vx, x[3] = vy (velocities) - 等等，StateSize=3，所以没有vy
             // 修正: x[0] = px, x[1] = py, x[2] = v
@@ -118,7 +123,7 @@ void test_jacobian() {
 
     class TestODE : public ODESolver<Float32, 2> {
     protected:
-        Float32 computeDerivative(Float32 t, const State& x) const override {
+        Float32 computeDerivative([[maybe_unused]] Float32 t, const State& x) const override {
             return x[0] + x[1];
         }
     };
@@ -127,7 +132,7 @@ void test_jacobian() {
     Vec<2> x({1.0f, 2.0f});
 
     // 计算雅可比矩阵
-    Mat<2, 2> J = ode.jacobian(0.0f, x);
+    [[maybe_unused]] Mat<2, 2> J = ode.jacobian(0.0f, x);
 
     // 验证雅可比矩阵元素
     assert(std::abs(J(0, 0) - 1.0f) < 1e-5f);
@@ -143,7 +148,7 @@ void test_ode_version() {
 
     // 检查版本宏
     assert(HLCL_VERSION_MAJOR == 1);
-    assert(HLCL_VERSION_MINOR == 0);
+    assert(HLCL_VERSION_MINOR == 1);
     assert(HLCL_VERSION_PATCH == 0);
 
     std::cout << "  ✓ Version constants correct" << std::endl;

@@ -13,6 +13,7 @@
 
 #include "backend.hpp"
 #include "gpu_impl.hpp"
+#include <span>
 #include <algorithm>
 #include <cassert>
 #include <cmath>
@@ -46,14 +47,14 @@ public:
     }
 
     ~Vector() {
-        if (data_) cl::sycl::free(data_, gpu::queue());
+        if (data_) sycl::free(data_, gpu::queue());
     }
 
-    Vector(const Vector& o) : n_(o.n_), data_(nullptr) { deepCopy_(o); }
+    Vector(const Vector& o) : data_(nullptr), n_(o.n_) { deepCopy_(o); }
     Vector& operator=(const Vector& o) {
         if (this != &o) {
             if (kDynamic) {
-                if (data_) cl::sycl::free(data_, gpu::queue());
+                if (data_) sycl::free(data_, gpu::queue());
                 n_ = o.n_;
                 data_ = nullptr;
             }
@@ -61,10 +62,10 @@ public:
         }
         return *this;
     }
-    Vector(Vector&& o) noexcept : n_(o.n_), data_(o.data_) { o.n_ = 0; o.data_ = nullptr; }
+    Vector(Vector&& o) noexcept : data_(o.data_), n_(o.n_) { o.n_ = 0; o.data_ = nullptr; }
     Vector& operator=(Vector&& o) noexcept {
         if (this != &o) {
-            if (data_) cl::sycl::free(data_, gpu::queue());
+            if (data_) sycl::free(data_, gpu::queue());
             n_ = o.n_;
             data_ = o.data_;
             o.n_ = 0;
@@ -82,7 +83,7 @@ public:
     template<typename U, int Size2, Backend B2>
     Vector& operator=(const Vector<U, Size2, B2>& o) {
         if (kDynamic) {
-            if (data_) cl::sycl::free(data_, gpu::queue());
+            if (data_) sycl::free(data_, gpu::queue());
             n_ = o.size();
             alloc_();
         } else {
@@ -128,13 +129,13 @@ public:
     void resize(size_type n) {
         if (!kDynamic) return;
         if (n == n_) return;
-        T* nd = (n > 0) ? cl::sycl::malloc_shared<T>(n, gpu::queue()) : nullptr;
+        T* nd = (n > 0) ? sycl::malloc_shared<T>(n, gpu::queue()) : nullptr;
         if (nd) {
             const int m = (data_) ? std::min(n_, n) : 0;
             for (int i = 0; i < m; ++i) nd[i] = data_[i];
             for (int i = m; i < n; ++i) nd[i] = T{0};
         }
-        if (data_) cl::sycl::free(data_, gpu::queue());
+        if (data_) sycl::free(data_, gpu::queue());
         data_ = nd;
         n_ = n;
     }
@@ -176,37 +177,37 @@ public:
         assert(o.size() == size() && "vector sizes must match");
         Vector r;
         r.resize(size());
-        if (size() > 0) gpu::vector_add<T>(data(), o.data(), r.data(), size());
+        if (size() > 0) gpu::vector_add<T>(span_(), o.span_(), r.span_());
         return r;
     }
     Vector operator-(const Vector& o) const {
         assert(o.size() == size() && "vector sizes must match");
         Vector r;
         r.resize(size());
-        if (size() > 0) gpu::vector_sub<T>(data(), o.data(), r.data(), size());
+        if (size() > 0) gpu::vector_sub<T>(span_(), o.span_(), r.span_());
         return r;
     }
     Vector& operator+=(const Vector& o) {
         assert(o.size() == size() && "vector sizes must match");
-        if (size() > 0) gpu::vector_add<T>(data(), o.data(), data(), size());
+        if (size() > 0) gpu::vector_add<T>(span_(), o.span_(), span_());
         return *this;
     }
     Vector& operator-=(const Vector& o) {
         assert(o.size() == size() && "vector sizes must match");
-        if (size() > 0) gpu::vector_sub<T>(data(), o.data(), data(), size());
+        if (size() > 0) gpu::vector_sub<T>(span_(), o.span_(), span_());
         return *this;
     }
     Vector& operator*=(T s) {
-        if (size() > 0) gpu::vector_scale<T>(s, data(), data(), size());
+        if (size() > 0) gpu::vector_scale<T>(s, span_(), span_());
         return *this;
     }
     Vector& operator/=(T s) {
-        if (size() > 0) gpu::vector_scale<T>(static_cast<T>(T{1} / s), data(), data(), size());
+        if (size() > 0) gpu::vector_scale<T>(static_cast<T>(T{1} / s), span_(), span_());
         return *this;
     }
     Vector operator-() const {
         Vector r(*this);
-        if (size() > 0) gpu::vector_scale<T>(T{-1}, data(), r.data(), size());
+        if (size() > 0) gpu::vector_scale<T>(T{-1}, span_(), r.span_());
         return r;
     }
     Vector operator+(T s) const {
@@ -217,21 +218,23 @@ public:
     Vector operator-(T s) const { return *this + (-s); }
     Vector operator*(T s) const {
         Vector r(*this);
-        if (size() > 0) gpu::vector_scale<T>(s, data(), r.data(), size());
+        if (size() > 0) gpu::vector_scale<T>(s, span_(), r.span_());
         return r;
     }
     Vector operator/(T s) const {
         Vector r(*this);
-        if (size() > 0) gpu::vector_scale<T>(static_cast<T>(T{1} / s), data(), r.data(), size());
+        if (size() > 0) gpu::vector_scale<T>(static_cast<T>(T{1} / s), span_(), r.span_());
         return r;
     }
 
 private:
+    std::span<T> span_() { return {data_, static_cast<std::size_t>(n_)}; }
+    std::span<const T> span_() const { return {data_, static_cast<std::size_t>(n_)}; }
     T* data_ = nullptr;
     size_type n_ = 0;
 
     void alloc_() {
-        if (n_ > 0) data_ = cl::sycl::malloc_shared<T>(n_, gpu::queue());
+        if (n_ > 0) data_ = sycl::malloc_shared<T>(n_, gpu::queue());
     }
     // (Re)allocate for n_ elements and deep-copy from o. Fixed-size copy
     // assignment reuses the existing allocation (same length); dynamic
@@ -239,7 +242,7 @@ private:
     void deepCopy_(const Vector& o) {
         const bool needAlloc = kDynamic || data_ == nullptr;
         if (kDynamic && data_) {
-            cl::sycl::free(data_, gpu::queue());
+            sycl::free(data_, gpu::queue());
             data_ = nullptr;
         }
         n_ = kDynamic ? o.n_ : n_;

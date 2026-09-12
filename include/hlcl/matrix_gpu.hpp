@@ -34,17 +34,17 @@ public:
     static constexpr int kCols = Cols;
     static constexpr Backend kBackend = Backend::GPU;
 
-    Matrix() : data_(cl::sycl::malloc_shared<T>(Rows * Cols, gpu::queue())) {
+    Matrix() : data_(sycl::malloc_shared<T>(Rows * Cols, gpu::queue())) {
         fill(T{0});
     }
 
     explicit Matrix(const T* p)
-        : data_(cl::sycl::malloc_shared<T>(Rows * Cols, gpu::queue())) {
+        : data_(sycl::malloc_shared<T>(Rows * Cols, gpu::queue())) {
         std::memcpy(data_, p, sizeof(T) * Rows * Cols);
     }
 
     Matrix(std::initializer_list<std::initializer_list<T>> init)
-        : data_(cl::sycl::malloc_shared<T>(Rows * Cols, gpu::queue())) {
+        : data_(sycl::malloc_shared<T>(Rows * Cols, gpu::queue())) {
         fill(T{0});
         size_type r = 0;
         for (const auto& row : init) {
@@ -58,11 +58,11 @@ public:
     }
 
     ~Matrix() {
-        if (data_) cl::sycl::free(data_, gpu::queue());
+        if (data_) sycl::free(data_, gpu::queue());
     }
 
     Matrix(const Matrix& o)
-        : data_(cl::sycl::malloc_shared<T>(Rows * Cols, gpu::queue())) {
+        : data_(sycl::malloc_shared<T>(Rows * Cols, gpu::queue())) {
         std::memcpy(data_, o.data_, sizeof(T) * Rows * Cols);
     }
     Matrix& operator=(const Matrix& o) {
@@ -72,7 +72,7 @@ public:
     Matrix(Matrix&& o) noexcept : data_(o.data_) { o.data_ = nullptr; }
     Matrix& operator=(Matrix&& o) noexcept {
         if (this != &o) {
-            if (data_) cl::sycl::free(data_, gpu::queue());
+            if (data_) sycl::free(data_, gpu::queue());
             data_ = o.data_;
             o.data_ = nullptr;
         }
@@ -82,7 +82,7 @@ public:
     // Converting ctor from any backend of the same element/shape.
     template<typename U, Backend B2>
     Matrix(const Matrix<U, Rows, Cols, B2>& o)
-        : data_(cl::sycl::malloc_shared<T>(Rows * Cols, gpu::queue())) {
+        : data_(sycl::malloc_shared<T>(Rows * Cols, gpu::queue())) {
         for (int i = 0; i < Rows; ++i)
             for (int j = 0; j < Cols; ++j) (*this)(i, j) = static_cast<T>(o(i, j));
     }
@@ -186,7 +186,10 @@ public:
         Matrix<T, Rows, OtherCols, Backend::GPU> r;
         if constexpr (Rows == Cols && Cols == OtherCols && B2 == Backend::GPU &&
                       std::is_same<T, U>::value) {
-            gpu::matrix_multiply<T, Rows>(data(), o.data(), r.data());
+            gpu::matrix_multiply<T, Rows>(
+                {data(), static_cast<std::size_t>(Rows * Cols)},
+                {o.data(), static_cast<std::size_t>(Cols * OtherCols)},
+                {r.data(), static_cast<std::size_t>(Rows * OtherCols)});
         } else {
             for (int i = 0; i < Rows; ++i)
                 for (int j = 0; j < OtherCols; ++j) {
@@ -218,7 +221,9 @@ Matrix<T, N, N, Backend::GPU> matrixMultiplyGPU(
     const Matrix<T, N, N, Backend::GPU>& A,
     const Matrix<T, N, N, Backend::GPU>& B) {
     Matrix<T, N, N, Backend::GPU> r;
-    gpu::matrix_multiply<T, N>(A.data(), B.data(), r.data());
+    gpu::matrix_multiply<T, N>({A.data(), std::size_t(N * N)},
+                               {B.data(), std::size_t(N * N)},
+                               {r.data(), std::size_t(N * N)});
     return r;
 }
 
@@ -226,14 +231,15 @@ Matrix<T, N, N, Backend::GPU> matrixMultiplyGPU(
 template<typename T, int N>
 Matrix<T, N, N, Backend::GPU> inverseGPU(const Matrix<T, N, N, Backend::GPU>& m) {
     Matrix<T, N, N, Backend::GPU> r;
-    gpu::matrix_inverse<T, N>(m.data(), r.data());
+    gpu::matrix_inverse<T, N>({m.data(), std::size_t(N * N)},
+                              {r.data(), std::size_t(N * N)});
     return r;
 }
 
 /// det(m) via the SYCL elimination kernel.
 template<typename T, int N>
 T determinantGPU(const Matrix<T, N, N, Backend::GPU>& m) {
-    return gpu::matrix_determinant<T, N>(m.data());
+    return gpu::matrix_determinant<T, N>({m.data(), std::size_t(N * N)});
 }
 
 } // namespace hlcl

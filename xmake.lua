@@ -10,6 +10,10 @@
 -- 本包定义同时在本文件内给出 (内嵌包), `xmake require -y hlcl` 即可验证安装。
 local dir = os.scriptdir()
 
+-- C++20 (concepts/span 等): 根项目同步声明; 此处保证独立构建时也成立。
+set_languages("c++20")
+set_warnings("all", "extra", "pedantic")
+
 -- ============ 独立构建判定 ============
 -- hlcl 可独立构建/测试 (cd hlcl && xmake ...): 此时选项、mypack 包仓库与
 -- 后端依赖由本文件自持; 被 avbd 根 xmake.lua includes 时, 这些由根提供,
@@ -83,7 +87,7 @@ package("hlcl")
     on_test(function (package)
         assert(package:has_cxxtypes("hlcl::Vec<3>", {
             includes = "hlcl/vector.hpp",
-            configs = {languages = "c++17"},
+            configs = {languages = "c++20"},
             defines = package:config("gpu") and "HLCL_GPU_ENABLED" or nil,
         }))
     end)
@@ -176,11 +180,13 @@ function _hlcl_test(name)
         set_kind("binary")
         add_files(path.join(tests_dir, name .. ".cpp"))
         add_deps("hlcl")
+        -- 裸 assert 的测试文件在文件头 #undef NDEBUG 保证断言存活 (见 tests/)
 end
 
 _hlcl_test("test_vector")
 _hlcl_test("test_matrix")
 _hlcl_test("test_ode")
+_hlcl_test("test_quaternion")
 _hlcl_test("fuzz_test")
 _hlcl_test("test_special_values")
 _hlcl_test("test_error_handling")
@@ -249,7 +255,7 @@ function _add_runner(runner_name, list)
 end
 
 _add_runner("run_hlcl_tests", { "test_vector", "test_matrix", "test_ode", "fuzz_test" })
-_add_runner("run_hlcl_edge",  { "test_special_values", "test_error_handling", "test_concurrent" })
+_add_runner("run_hlcl_edge",  { "test_special_values", "test_error_handling", "test_concurrent", "test_quaternion" })
 if has_config("gpu") then
     _add_runner("run_hlcl_gpu", { "test_gpu_core", "test_gpu_matrix_multiply", "test_host_device_copy" })
 end

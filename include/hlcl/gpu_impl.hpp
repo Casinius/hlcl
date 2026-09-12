@@ -1,11 +1,13 @@
 #pragma once
 
-// GPU (SYCL) kernel layer for AVBD.
+// GPU (SYCL 2020) kernel layer for hlcl.
 //
 // Design notes
 // ------------
-// * Header-only by intent (mirrors avbd_core). All kernels are inline so a
+// * Header-only by intent (mirrors the CPU core). All kernels are inline so a
 //   GPU-mode translation unit gets them without linking an orphaned .cpp.
+// * SYCL 2020 interface: <sycl/sycl.hpp>, sycl::*_selector_v, sycl::reduction.
+//   No deprecated SYCL 1.2.1 API (cl::sycl namespace, *_selector classes).
 // * Backend selection is OpenCL-portable: it prefers an accelerator (GPU),
 //   honours the HLCL_SYCL_DEVICE env var (gpu|cpu), and otherwise falls back
 //   to whatever SYCL device the runtime exposes (AdaptiveCpp OpenMP host,
@@ -13,18 +15,22 @@
 // * Every kernel is deliberately tiny and self-contained. Mathematically they
 //   replicate the CPU (Eigen-like) reference in core; correctness is asserted
 //   by the GPU tests comparing kernel output against the CPU path.
-// * Kernels take flat row-major pointers that MUST be shared-USM allocations
-//   (sycl::malloc_shared; on the AdaptiveCpp OpenMP host this is equivalent
-//   to plain malloc). Kernels read/write them in place: no copies, no
-//   transient SYCL buffers, no accessors.
+// * Kernels take flat row-major std::span arguments whose storage MUST be
+//   shared-USM allocations (sycl::malloc_shared; on the AdaptiveCpp OpenMP
+//   host this is equivalent to plain malloc). Kernels read/write them in
+//   place: no copies, no transient SYCL buffers, no accessors.
 
 #ifdef HLCL_GPU_ENABLED
 
-#include <CL/sycl.hpp>
+#include <sycl/sycl.hpp>
+
 #include <cmath>
+#include <cstddef>
 #include <cstdlib>
+#include <span>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 
 namespace hlcl {
 
@@ -32,24 +38,21 @@ namespace gpu {
 
 /// Pick the SYCL device: honour HLCL_SYCL_DEVICE (gpu|cpu), else prefer a GPU
 /// accelerator, else the runtime default (CPU/OpenMP host in CPU-only builds).
-inline cl::sycl::device select_device() {
-    cl::sycl::device dev;
+inline sycl::device select_device() {
     if (const char* e = std::getenv("HLCL_SYCL_DEVICE")) {
-        std::string sel = e;
+        const std::string_view sel = e;
         try {
-            if (sel == "cpu") dev = cl::sycl::device(cl::sycl::cpu_selector());
-            else if (sel == "gpu") dev = cl::sycl::device(cl::sycl::gpu_selector());
-            else dev = cl::sycl::device(cl::sycl::default_selector());
-            return dev;
-        } catch (const cl::sycl::exception&) {
+            if (sel == "cpu") return sycl::device{sycl::cpu_selector_v};
+            if (sel == "gpu") return sycl::device{sycl::gpu_selector_v};
+        } catch (const sycl::exception&) {
             // requested device class unavailable -> fall through to default
         }
     }
     try {
-        const auto devices = cl::sycl::device::get_devices(cl::sycl::info::device_type::gpu);
-        if (!devices.empty()) return devices[0];
+        const auto devices = sycl::device::get_devices(sycl::info::device_type::gpu);
+        if (!devices.empty()) return devices.front();
     } catch (...) { /* fall through */ }
-    return cl::sycl::device(cl::sycl::default_selector());
+    return sycl::device{}; // runtime default selector semantics
 }
 
 /// Process-wide shared queue (lazily created).
@@ -58,9 +61,9 @@ inline cl::sycl::device select_device() {
 /// can segfault at process exit when a process-wide SYCL queue is destroyed
 /// (its runtime teardown races the OpenMP worker threads of prior kernels).
 /// Results are fully correct; only the exit-time destructor path is unsafe.
-inline cl::sycl::queue& queue() {
-    static cl::sycl::queue* q = new cl::sycl::queue(
-        select_device(), cl::sycl::property::queue::in_order());
+inline sycl::queue& queue() {
+    static sycl::queue* q = new sycl::queue(
+        select_device(), sycl::property::queue::in_order());
     return *q;
 }
 
@@ -68,14 +71,18 @@ inline cl::sycl::queue& queue() {
 // Matrix kernels: C = A * B   (all row-major, N x N)
 // ---------------------------------------------------------------------------
 template<typename T, int N>
-inline void matrix_multiply(const T* A, const T* B, T* C) {
-    queue().submit([&](cl::sycl::handler& h) {
-        h.parallel_for(cl::sycl::range<2>(N, N), [=](cl::sycl::item<2> it) {
-            const int i = static_cast<int>(it[0]);
-            const int j = static_cast<int>(it[1]);
+inline void matrix_multiply(std::span<const T> A, std::span<const T> B,
+                            std::span<T> C) {
+    const T* pA = A.data();
+    const T* pB = B.data();
+    T* pC = C.data();
+    queue().submit([&](sycl::handler& h) {
+        h.parallel_for(sycl::range<2>(N, N), [=](sycl::id<2> idx) {
+            const int i = static_cast<int>(idx[0]);
+            const int j = static_cast<int>(idx[1]);
             T s = T{0};
-            for (int k = 0; k < N; ++k) s += A[i * N + k] * B[k * N + j];
-            C[i * N + j] = s;
+            for (int k = 0; k < N; ++k) s += pA[i * N + k] * pB[k * N + j];
+            pC[i * N + j] = s;
         });
     });
     queue().wait();
@@ -86,11 +93,13 @@ inline void matrix_multiply(const T* A, const T* B, T* C) {
 // Singular matrices produce a zero matrix (matches CPU inverse() contract).
 // ---------------------------------------------------------------------------
 template<typename T, int N>
-inline void matrix_inverse(const T* A_in, T* C_out) {
-    queue().submit([&](cl::sycl::handler& h) {
+inline void matrix_inverse(std::span<const T> A_in, std::span<T> C_out) {
+    const T* pA = A_in.data();
+    T* pC = C_out.data();
+    queue().submit([&](sycl::handler& h) {
         h.single_task([=]() {
             T m[N * N];
-            for (int i = 0; i < N * N; ++i) m[i] = A_in[i];
+            for (int i = 0; i < N * N; ++i) m[i] = pA[i];
             T inv[N * N];
             for (int i = 0; i < N; ++i)
                 for (int j = 0; j < N; ++j) inv[i * N + j] = (i == j) ? T{1} : T{0};
@@ -102,7 +111,7 @@ inline void matrix_inverse(const T* A_in, T* C_out) {
                     if (v > mx) { mx = v; piv = r; }
                 }
                 if (mx == T{0}) {
-                    for (int i = 0; i < N * N; ++i) C_out[i] = T{0};
+                    for (int i = 0; i < N * N; ++i) pC[i] = T{0};
                     return; // singular
                 }
                 if (piv != col) {
@@ -122,7 +131,7 @@ inline void matrix_inverse(const T* A_in, T* C_out) {
                     }
                 }
             }
-            for (int i = 0; i < N * N; ++i) C_out[i] = inv[i];
+            for (int i = 0; i < N * N; ++i) pC[i] = inv[i];
         });
     });
     queue().wait();
@@ -132,12 +141,13 @@ inline void matrix_inverse(const T* A_in, T* C_out) {
 // Matrix determinant via Gaussian elimination with partial pivoting.
 // ---------------------------------------------------------------------------
 template<typename T, int N>
-inline T matrix_determinant(const T* A_in) {
-    T* d = cl::sycl::malloc_shared<T>(1, queue());
-    queue().submit([=](cl::sycl::handler& h) {
+[[nodiscard]] inline T matrix_determinant(std::span<const T> A_in) {
+    const T* pA = A_in.data();
+    T* d = sycl::malloc_shared<T>(1, queue());
+    queue().submit([=](sycl::handler& h) {
         h.single_task([=]() {
             T m[N * N];
-            for (int i = 0; i < N * N; ++i) m[i] = A_in[i];
+            for (int i = 0; i < N * N; ++i) m[i] = pA[i];
             T result = T{1};
             for (int k = 0; k < N; ++k) {
                 int piv = k;
@@ -167,7 +177,7 @@ inline T matrix_determinant(const T* A_in) {
     });
     queue().wait();
     const T det = d[0];
-    cl::sycl::free(d, queue());
+    sycl::free(d, queue());
     return det;
 }
 
@@ -175,51 +185,81 @@ inline T matrix_determinant(const T* A_in) {
 // Vector kernels (elementwise, length n).
 // ---------------------------------------------------------------------------
 template<typename T>
-inline void vector_add(const T* v1, const T* v2, T* out, int n) {
-    queue().submit([&](cl::sycl::handler& h) {
-        h.parallel_for(cl::sycl::range<1>(n), [=](cl::sycl::id<1> i) { out[i] = v1[i] + v2[i]; });
+inline void vector_add(std::span<const T> v1, std::span<const T> v2,
+                       std::span<T> out) {
+    const T* p1 = v1.data();
+    const T* p2 = v2.data();
+    T* po = out.data();
+    queue().submit([&](sycl::handler& h) {
+        h.parallel_for(sycl::range<1>(out.size()),
+                       [=](sycl::id<1> i) { po[i] = p1[i] + p2[i]; });
     });
     queue().wait();
 }
 
 template<typename T>
-inline void vector_scale(T scalar, const T* v, T* out, int n) {
-    queue().submit([&](cl::sycl::handler& h) {
-        h.parallel_for(cl::sycl::range<1>(n), [=](cl::sycl::id<1> i) { out[i] = scalar * v[i]; });
+inline void vector_scale(T scalar, std::span<const T> v, std::span<T> out) {
+    const T* pv = v.data();
+    T* po = out.data();
+    queue().submit([&](sycl::handler& h) {
+        h.parallel_for(sycl::range<1>(out.size()),
+                       [=](sycl::id<1> i) { po[i] = scalar * pv[i]; });
     });
     queue().wait();
 }
 
 /// out = a - b (elementwise). In-place aliasing (out == a or out == b) is safe.
 template<typename T>
-inline void vector_sub(const T* a, const T* b, T* out, int n) {
-    queue().submit([&](cl::sycl::handler& h) {
-        h.parallel_for(cl::sycl::range<1>(n), [=](cl::sycl::id<1> i) { out[i] = a[i] - b[i]; });
+inline void vector_sub(std::span<const T> a, std::span<const T> b,
+                       std::span<T> out) {
+    const T* pa = a.data();
+    const T* pb = b.data();
+    T* po = out.data();
+    queue().submit([&](sycl::handler& h) {
+        h.parallel_for(sycl::range<1>(out.size()),
+                       [=](sycl::id<1> i) { po[i] = pa[i] - pb[i]; });
+    });
+    queue().wait();
+}
+
+/// out = a / b (elementwise, componentwise division — NOT reciprocal
+/// multiplication; keeps bit-for-bit parity with the CPU reference).
+/// In-place aliasing (out == a) is safe.
+template<typename T>
+inline void vector_divide(std::span<const T> a, std::span<const T> b,
+                          std::span<T> out) {
+    const T* pa = a.data();
+    const T* pb = b.data();
+    T* po = out.data();
+    queue().submit([&](sycl::handler& h) {
+        h.parallel_for(sycl::range<1>(out.size()),
+                       [=](sycl::id<1> i) { po[i] = pa[i] / pb[i]; });
     });
     queue().wait();
 }
 
 /// Normalize v to unit length. Writes zeros for a zero vector.
+/// Pass 1 is a sycl::reduction over the squared components; pass 2 scales.
+/// The in-order queue guarantees pass 2 observes the completed reduction.
 template<typename T>
-inline void vector_normalize(const T* v, T* out, int n) {
-    T* norm = cl::sycl::malloc_shared<T>(1, queue());
-    norm[0] = T{0};
-    // reduction (single work item over the whole vector); the second submit
-    // is ordered after this one by the in-order queue.
-    queue().submit([=](cl::sycl::handler& h) {
-        h.single_task([=]() {
-            T s = T{0};
-            for (int i = 0; i < n; ++i) s += v[i] * v[i];
-            norm[0] = static_cast<T>(std::sqrt(s));
-        });
+inline void vector_normalize(std::span<const T> v, std::span<T> out) {
+    const T* pv = v.data();
+    T* po = out.data();
+    T* norm2 = sycl::malloc_shared<T>(1, queue());
+    norm2[0] = T{0};
+    queue().submit([&](sycl::handler& h) {
+        h.parallel_for(sycl::range<1>(v.size()),
+                       sycl::reduction(norm2, sycl::plus<T>()),
+                       [=](sycl::id<1> i, auto& acc) { acc += pv[i] * pv[i]; });
     });
-    queue().submit([&](cl::sycl::handler& h) {
-        h.parallel_for(cl::sycl::range<1>(n), [=](cl::sycl::id<1> i) {
-            out[i] = (norm[0] > T{0}) ? (v[i] / norm[0]) : T{0};
+    queue().submit([&](sycl::handler& h) {
+        h.parallel_for(sycl::range<1>(out.size()), [=](sycl::id<1> i) {
+            const T norm = sycl::sqrt(norm2[0]);
+            po[i] = (norm > T{0}) ? (pv[i] / norm) : T{0};
         });
     });
     queue().wait();
-    cl::sycl::free(norm, queue());
+    sycl::free(norm2, queue());
 }
 
 } // namespace gpu
@@ -237,12 +277,12 @@ struct DeviceInfo {
 };
 
 inline DeviceInfo get_device_info() {
-    const cl::sycl::device& dev = gpu::queue().get_device();
+    const sycl::device& dev = gpu::queue().get_device();
     DeviceInfo info;
-    info.name = dev.get_info<cl::sycl::info::device::name>();
-    info.vendor = dev.get_info<cl::sycl::info::device::vendor>();
-    info.global_memory = dev.get_info<cl::sycl::info::device::global_mem_size>();
-    info.max_compute_units = dev.get_info<cl::sycl::info::device::max_compute_units>();
+    info.name = dev.get_info<sycl::info::device::name>();
+    info.vendor = dev.get_info<sycl::info::device::vendor>();
+    info.global_memory = dev.get_info<sycl::info::device::global_mem_size>();
+    info.max_compute_units = dev.get_info<sycl::info::device::max_compute_units>();
     return info;
 }
 

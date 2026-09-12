@@ -1,3 +1,6 @@
+// release 模式构建 (xmake 定义 NDEBUG) 下 assert 会被编译剔除;
+// 测试断言必须始终生效, 故先取消 NDEBUG。
+#undef NDEBUG
 #include "hlcl/core.hpp"
 #include <cassert>
 #include <iostream>
@@ -54,7 +57,7 @@ void test_vector_arithmetic() {
     std::cout << "  ✓ Scalar multiplication works" << std::endl;
 
     // 点积
-    float dot = v1.dot(v2);
+    [[maybe_unused]] float dot = v1.dot(v2);
     assert(dot == 32.0f);
     std::cout << "  ✓ Dot product works" << std::endl;
 
@@ -85,12 +88,12 @@ void test_vector_stats() {
     std::cout << "  ✓ Max/Min works" << std::endl;
 
     // 范数
-    float norm = v1.norm();
+    [[maybe_unused]] float norm = v1.norm();
     assert(std::abs(norm - 3.741657f) < 1e-5f);
     std::cout << "  ✓ Norm works" << std::endl;
 
     // 平方范数
-    float sqNorm = v1.squaredNorm();
+    [[maybe_unused]] float sqNorm = v1.squaredNorm();
     assert(std::abs(sqNorm - 14.0f) < 1e-5f);
     std::cout << "  ✓ Squared norm works" << std::endl;
 }

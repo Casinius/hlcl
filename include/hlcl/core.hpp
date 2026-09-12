@@ -4,5 +4,6 @@
 #include "backend.hpp"
 #include "matrix.hpp"
 #include "vector.hpp"
+#include "quaternion.hpp"
 #include "ode_solver.hpp"
 #include "operations.hpp"

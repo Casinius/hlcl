@@ -5,7 +5,7 @@
 using namespace hlcl;
 using namespace hlcl::test;
 
-int main(int argc, char** argv) {
+int main() {
     TestRunner runner;
 
     runner.add_suite(std::make_unique<FuzzTestSuite>());

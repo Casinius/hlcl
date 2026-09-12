@@ -34,8 +34,8 @@ private:
             }
 
             // 确保不会除以零
-            float inv1 = (v1.norm() > 1e-10f) ? 1.0f / v1.norm() : 1.0f;
-            float inv2 = (v2.norm() > 1e-10f) ? 1.0f / v2.norm() : 1.0f;
+            [[maybe_unused]] float inv1 = (v1.norm() > 1e-10f) ? 1.0f / v1.norm() : 1.0f;
+            [[maybe_unused]] float inv2 = (v2.norm() > 1e-10f) ? 1.0f / v2.norm() : 1.0f;
 
             // 所有运算都应该不会崩溃
             Vec<3> sum = v1 + v2;
@@ -52,7 +52,7 @@ private:
             // 范数计算
             float norm1 = v1.norm();
             float norm2 = v2.norm();
-            float normSum = sum.norm();
+            [[maybe_unused]] float normSum = sum.norm();
             assert_true(norm1 >= 0.0f && norm1 <= 3.0f, "Fuzz norm in range");
             assert_true(norm2 >= 0.0f && norm2 <= 3.0f, "Fuzz norm in range");
 
@@ -95,13 +95,13 @@ private:
             // 矩阵范数
             float norm1 = m1.norm();
             float norm2 = m2.norm();
-            float normMult = multiplied.norm();
+            [[maybe_unused]] float normMult = multiplied.norm();
             assert_true(norm1 >= 0.0f && norm1 <= 9.0f, "Fuzz matrix norm in range");
             assert_true(norm2 >= 0.0f && norm2 <= 9.0f, "Fuzz matrix norm in range");
 
             // Trace
             float trace1 = m1.trace();
-            float trace2 = m2.trace();
+            [[maybe_unused]] float trace2 = m2.trace();
             assert_true(trace1 >= -3.0f && trace1 <= 3.0f, "Fuzz matrix trace in range");
         }
 
