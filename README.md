@@ -19,7 +19,7 @@ For one who is very serious about correctness , I build the whole test pipeline 
 * C++20 (concepts / span ; `-UNDEBUG`-independent test asserts)
 * Optional backends: AdaptiveCpp (SYCL 2020, `--gpu=y`) and Kompute v0.8.0 (Vulkan compute, `--kompute=y`)
 
-## Architecture (since v1.1.0)
+## Architecture (since v0.0.2)
 Vector / Matrix / Quaternion are single primary templates parameterized on
 `Backend { CPU, GPU, Kompute }`. All backend differences live in
 `BackendTraits<B>` (storage + kernel dispatch, `include/hlcl/backend_traits.hpp`,

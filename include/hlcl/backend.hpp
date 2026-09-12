@@ -16,9 +16,9 @@ enum class Backend {
 using Float32 = float;
 using Float64 = double;
 
-// 版本常量 (test_ode.cpp 断言 1.1.0)
-constexpr int HLCL_VERSION_MAJOR = 1;
-constexpr int HLCL_VERSION_MINOR = 1;
-constexpr int HLCL_VERSION_PATCH = 0;
+// 版本常量 (test_ode.cpp 断言 0.0.2)
+constexpr int HLCL_VERSION_MAJOR = 0;
+constexpr int HLCL_VERSION_MINOR = 0;
+constexpr int HLCL_VERSION_PATCH = 2;
 
 } // namespace hlcl

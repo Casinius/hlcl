@@ -147,9 +147,9 @@ void test_ode_version() {
     std::cout << "Testing AVBD version..." << std::endl;
 
     // 检查版本宏
-    assert(HLCL_VERSION_MAJOR == 1);
-    assert(HLCL_VERSION_MINOR == 1);
-    assert(HLCL_VERSION_PATCH == 0);
+    assert(HLCL_VERSION_MAJOR == 0);
+    assert(HLCL_VERSION_MINOR == 0);
+    assert(HLCL_VERSION_PATCH == 2);
 
     std::cout << "  ✓ Version constants correct" << std::endl;
 }
