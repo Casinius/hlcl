@@ -9,8 +9,21 @@ Even those who could do all above , they usually require custom toolchain , unli
 
 ## Why not just use AdaptiveCPP
 Because AdaptiveCPP uses clspv toolchain , which is not easy to use and embed.
-Also I was in charge of AdaptiveCPP pack in xmake and I temporarily have no time to finish clspv toolchain integration . 
+Also I was in charge of AdaptiveCPP pack in xmake and I temporarily have no time to finish clspv toolchain integration .
 If you wish to fully use AdaptiveCPP , it's welcome to pr to xmake-repo and here!
 
 ## How can we sure about that your project is not a toy
-For one who is very serious about correctness , I build the whole test pipeline , and support coverage computing . 
+For one who is very serious about correctness , I build the whole test pipeline , and support coverage computing .
+
+## Requirements
+* C++20 (concepts / span ; `-UNDEBUG`-independent test asserts)
+* Optional backends: AdaptiveCpp (SYCL 2020, `--gpu=y`) and Kompute v0.8.0 (Vulkan compute, `--kompute=y`)
+
+## Architecture (since v1.1.0)
+Vector / Matrix / Quaternion are single primary templates parameterized on
+`Backend { CPU, GPU, Kompute }`. All backend differences live in
+`BackendTraits<B>` (storage + kernel dispatch, `include/hlcl/backend_traits.hpp`,
+`gpu_impl.hpp`, `kompute_impl.hpp`) — one implementation, three backends, no
+per-backend class copies. Elementwise ops dispatch to SYCL / Vulkan kernels
+with CPU-bit-identical numerics (true division, no reciprocal multiply);
+reductions stay on the host (all storages are host-readable).
