@@ -14,7 +14,6 @@
 #include <iostream>
 
 #ifdef HLCL_GPU_ENABLED
-#include "hlcl/matrix_gpu.hpp"
 #include "hlcl/gpu_impl.hpp"
 #endif
 

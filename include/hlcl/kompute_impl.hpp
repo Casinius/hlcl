@@ -28,6 +28,7 @@
 
 #include <kompute/Kompute.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
@@ -340,6 +341,153 @@ inline void print_kompute_device_info() {
     std::fprintf(stderr, "  compute invocations/workgroup: %zu, float-only kernels: %s\n",
         info.max_compute_units, info.float_device ? "yes" : "no");
 }
+
+// ---------------------------------------------------------------------------
+// 原始指针向量算子 (临时张量搬运, 语义与 TensorPtr 版一致);
+// non-float: 宿主循环 (Kompute 0.8.0 无 shaderFloat64)。
+// ---------------------------------------------------------------------------
+template<typename T>
+inline void vector_add(const T* a, const T* b, T* out, int n) {
+    if (n <= 0) return;
+    if constexpr (kompute::kDeviceSupported<T>) {
+        auto ta = kompute::make_tensor<T>(std::size_t(n));
+        auto tb = kompute::make_tensor<T>(std::size_t(n));
+        auto to = kompute::make_tensor<T>(std::size_t(n));
+        std::memcpy(ta->data(), a, sizeof(T) * std::size_t(n));
+        std::memcpy(tb->data(), b, sizeof(T) * std::size_t(n));
+        kompute::vector_add<T>(ta, tb, to);
+        std::memcpy(out, to->data(), sizeof(T) * std::size_t(n));
+    } else {
+        for (int i = 0; i < n; ++i) out[i] = a[i] + b[i];
+    }
+}
+
+template<typename T>
+inline void vector_sub(const T* a, const T* b, T* out, int n) {
+    if (n <= 0) return;
+    if constexpr (kompute::kDeviceSupported<T>) {
+        auto ta = kompute::make_tensor<T>(std::size_t(n));
+        auto tb = kompute::make_tensor<T>(std::size_t(n));
+        auto to = kompute::make_tensor<T>(std::size_t(n));
+        std::memcpy(ta->data(), a, sizeof(T) * std::size_t(n));
+        std::memcpy(tb->data(), b, sizeof(T) * std::size_t(n));
+        kompute::vector_sub<T>(ta, tb, to);
+        std::memcpy(out, to->data(), sizeof(T) * std::size_t(n));
+    } else {
+        for (int i = 0; i < n; ++i) out[i] = a[i] - b[i];
+    }
+}
+
+template<typename T>
+inline void vector_scale(T s, const T* v, T* out, int n) {
+    if (n <= 0) return;
+    if constexpr (kompute::kDeviceSupported<T>) {
+        auto tv = kompute::make_tensor<T>(std::size_t(n));
+        auto to = kompute::make_tensor<T>(std::size_t(n));
+        std::memcpy(tv->data(), v, sizeof(T) * std::size_t(n));
+        kompute::vector_scale<T>(s, tv, to);
+        std::memcpy(out, to->data(), sizeof(T) * std::size_t(n));
+    } else {
+        for (int i = 0; i < n; ++i) out[i] = s * v[i];
+    }
+}
+
+// ---------------------------------------------------------------------------
+// BackendTraits<Backend::Kompute>: storage = kp::TensorT (eHost);
+// 标量除法走宿主真除法 (无专用标量除法内核; 数值与 CPU 逐位一致)。
+// ---------------------------------------------------------------------------
+template<>
+struct BackendTraits<Backend::Kompute> {
+    template<typename T, int Cap>
+    class Storage {
+        static_assert(Cap > 0, "fixed storage requires Cap > 0");
+    public:
+        Storage() : t_(kompute::make_tensor<T>(std::size_t(Cap))) {}
+        Storage(const Storage& o) : t_(kompute::make_tensor<T>(std::size_t(Cap))) {
+            std::memcpy(t_->data(), o.t_->data(), sizeof(T) * std::size_t(Cap));
+        }
+        Storage& operator=(const Storage& o) {
+            if (this != &o)
+                std::memcpy(t_->data(), o.t_->data(), sizeof(T) * std::size_t(Cap));
+            return *this;
+        }
+        Storage(Storage&& o) noexcept = default;
+        Storage& operator=(Storage&& o) noexcept = default;
+
+        constexpr std::size_t size() const { return static_cast<std::size_t>(Cap); }
+        T* data() { return t_->data(); }
+        const T* data() const { return t_->data(); }
+
+    private:
+        kompute::TensorPtr<T> t_;
+    };
+
+    template<typename T>
+    class Storage<T, 0> {
+    public:
+        Storage() = default;
+        std::size_t size() const { return static_cast<std::size_t>(n_); }
+        T* data() { return t_ ? t_->data() : nullptr; }
+        const T* data() const { return t_ ? t_->data() : nullptr; }
+        void resize(std::size_t n) {
+            const int ni = static_cast<int>(n);
+            if (ni == n_) return;
+            kompute::TensorPtr<T> nt = (ni > 0) ? kompute::make_tensor<T>(n) : nullptr;
+            const int m = (t_ && nt) ? std::min(n_, ni) : 0;
+            if (m > 0) std::memcpy(nt->data(), t_->data(), sizeof(T) * std::size_t(m));
+            if (nt && ni > m)
+                std::memset(nt->data() + m, 0, sizeof(T) * std::size_t(ni - m));
+            t_ = std::move(nt);
+            n_ = ni;
+        }
+
+        Storage(const Storage& o) : n_(o.n_) { copyAlloc_(o); }
+        Storage& operator=(const Storage& o) {
+            if (this != &o) {
+                t_ = nullptr;
+                n_ = o.n_;
+                copyAlloc_(o);
+            }
+            return *this;
+        }
+        Storage(Storage&& o) noexcept = default;
+        Storage& operator=(Storage&& o) noexcept = default;
+
+    private:
+        void copyAlloc_(const Storage& o) {
+            t_ = (n_ > 0) ? kompute::make_tensor<T>(std::size_t(n_)) : nullptr;
+            if (t_) std::memcpy(t_->data(), o.t_->data(), sizeof(T) * std::size_t(n_));
+        }
+        kompute::TensorPtr<T> t_;
+        int n_ = 0;
+    };
+
+    // ---- 算子 ----
+    template<typename T>
+    static void add(const T* a, const T* b, T* out, int n) {
+        vector_add<T>(a, b, out, n);
+    }
+    template<typename T>
+    static void sub(const T* a, const T* b, T* out, int n) {
+        vector_sub<T>(a, b, out, n);
+    }
+    template<typename T>
+    static void scale(T s, const T* v, T* out, int n) {
+        vector_scale<T>(s, v, out, n);
+    }
+    template<typename T>
+    static void div(T s, const T* v, T* out, int n) {
+        for (int i = 0; i < n; ++i) out[i] = v[i] / s;   // 宿主真除法
+    }
+    template<typename T>
+    static void negate(const T* v, T* out, int n) {
+        kompute::vector_scale<T>(T{-1}, v, out, n);
+    }
+    template<typename T, int N>
+    static void mat_mul(const T* a, const T* b, T* c) {
+        kompute::matrix_multiply<T, N>(a, b, c);
+    }
+};
 
 } // namespace hlcl
 

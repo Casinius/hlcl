@@ -19,14 +19,14 @@ public:
     virtual ~ODESolver() = default;
 
     // 标量导数: f(t, x)。由子类实现 (protected)。
-    State solveEuler(S t, const State& x0, S dt) const {
+    [[nodiscard]] State solveEuler(S t, const State& x0, S dt) const {
         const S f = computeDerivative(t, x0);
         State y = x0;
         for (int i = 0; i < N; ++i) y[i] = x0[i] + dt * f;
         return y;
     }
 
-    State solveHeun(S t, const State& x0, S dt) const {
+    [[nodiscard]] State solveHeun(S t, const State& x0, S dt) const {
         const S k1 = computeDerivative(t, x0);
         State yp = x0;
         for (int i = 0; i < N; ++i) yp[i] = x0[i] + dt * k1;
@@ -36,7 +36,7 @@ public:
         return y;
     }
 
-    State solveRK4(S t, const State& x0, S dt) const {
+    [[nodiscard]] State solveRK4(S t, const State& x0, S dt) const {
         State y = x0;
         const S h = dt;
         const S half = h / S{2};
@@ -61,7 +61,7 @@ public:
 
     // 数值雅可比矩阵 (中心差分): 因状态分量具有相同的标量动力学,
     // J(i, :) = grad(f) 对每一行 i 相同 —— 数学上正确的广播系统雅可比。
-    Matrix<S, N, N> jacobian(S t, const State& x) const {
+    [[nodiscard]] Matrix<S, N, N> jacobian(S t, const State& x) const {
         Matrix<S, N, N> J;
         State xp = x, xm = x;
         for (int j = 0; j < N; ++j) {
@@ -85,7 +85,7 @@ public:
     }
 
     template<typename VecP, typename VecV>
-    State packState(const VecP& pos, int nPos, const VecV& vel, int nVel) const {
+    [[nodiscard]] State packState(const VecP& pos, int nPos, const VecV& vel, int nVel) const {
         State full;
         for (int k = 0; k < nPos; ++k) full[k] = pos[k];
         for (int k = 0; k < nVel; ++k) full[nPos + k] = vel[k];

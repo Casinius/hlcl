@@ -12,7 +12,6 @@
 
 #ifdef HLCL_KOMPUTE_ENABLED
 #include "hlcl/kompute_impl.hpp"
-#include "hlcl/matrix_kompute.hpp"
 #endif
 
 namespace {

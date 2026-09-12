@@ -140,9 +140,16 @@ private:
             // 验证结果
             assert_true(sum[0] >= -200.0f && sum[0] <= 200.0f, "Fuzz arithmetic sum in range");
             assert_true(diff[0] >= -200.0f && diff[0] <= 200.0f, "Fuzz arithmetic diff in range");
+            assert_true(sumScalar[0] >= -100.0f && sumScalar[0] <= 200.0f,
+                        "Fuzz scalar add in range");
+            assert_true(diffScalar[0] >= -100.0f && diffScalar[0] <= 100.0f,
+                        "Fuzz scalar sub in range");
             assert_true(scalarMult1[0] >= 0.0f && scalarMult1[0] <= 1000.0f, "Fuzz scalar mult in range");
+            assert_true(scalarMult2[0] >= 0.0f && scalarMult2[0] <= 1000.0f, "Fuzz scalar mult2 in range");
             assert_true(std::isfinite(scalarDiv1[0]) && scalarDiv1[0] >= 0.0f,
                         "Fuzz scalar div finite");
+            assert_true(std::isfinite(scalarDiv2[0]) && scalarDiv2[0] >= 0.0f,
+                        "Fuzz scalar div2 finite");
         }
 
         std::cout << "  Tested " << iterations << " random arithmetic operations" << std::endl;

@@ -262,6 +262,19 @@ inline void vector_normalize(std::span<const T> v, std::span<T> out) {
     sycl::free(norm2, queue());
 }
 
+/// out[i] = v[i] / s (true scalar division — NOT reciprocal multiplication;
+/// keeps bit-for-bit parity with the CPU reference). In-place aliasing safe.
+template<typename T>
+inline void vector_divide_scalar(T s, std::span<const T> v, std::span<T> out) {
+    const T* pv = v.data();
+    T* po = out.data();
+    queue().submit([&](sycl::handler& h) {
+        h.parallel_for(sycl::range<1>(out.size()),
+                       [=](sycl::id<1> i) { po[i] = pv[i] / s; });
+    });
+    queue().wait();
+}
+
 } // namespace gpu
 
 // ---- top-level runtime helpers (unchanged public surface) ----
@@ -293,6 +306,133 @@ inline void print_device_info() {
                  static_cast<double>(info.global_memory) / (1024.0 * 1024.0),
                  info.max_compute_units);
 }
+
+// ---------------------------------------------------------------------------
+// BackendTraits<Backend::GPU>: storage = shared-USM; ops = SYCL kernels.
+// ---------------------------------------------------------------------------
+template<>
+struct BackendTraits<Backend::GPU> {
+    template<typename T, int Cap>
+    class Storage {
+        static_assert(Cap > 0, "fixed storage requires Cap > 0");
+    public:
+        Storage() : d_(sycl::malloc_shared<T>(static_cast<std::size_t>(Cap), gpu::queue())) {
+            for (int i = 0; i < Cap; ++i) d_[i] = T{0};
+        }
+        ~Storage() { if (d_) sycl::free(d_, gpu::queue()); }
+
+        Storage(const Storage& o) : Storage() {
+            for (int i = 0; i < Cap; ++i) d_[i] = o.d_[i];
+        }
+        Storage& operator=(const Storage& o) {
+            if (this != &o) for (int i = 0; i < Cap; ++i) d_[i] = o.d_[i];
+            return *this;
+        }
+        Storage(Storage&& o) noexcept : d_(o.d_) { o.d_ = nullptr; }
+        Storage& operator=(Storage&& o) noexcept {
+            if (this != &o) {
+                if (d_) sycl::free(d_, gpu::queue());
+                d_ = o.d_;
+                o.d_ = nullptr;
+            }
+            return *this;
+        }
+
+        constexpr std::size_t size() const { return static_cast<std::size_t>(Cap); }
+        T* data() { return d_; }
+        const T* data() const { return d_; }
+
+    private:
+        T* d_;
+    };
+
+    template<typename T>
+    class Storage<T, 0> {
+    public:
+        Storage() = default;
+        ~Storage() { if (d_) sycl::free(d_, gpu::queue()); }
+
+        Storage(const Storage& o) : n_(o.n_) { copyAlloc_(o); }
+        Storage& operator=(const Storage& o) {
+            if (this != &o) {
+                if (d_) sycl::free(d_, gpu::queue());
+                n_ = o.n_;
+                copyAlloc_(o);
+            }
+            return *this;
+        }
+        Storage(Storage&& o) noexcept : d_(o.d_), n_(o.n_) { o.d_ = nullptr; o.n_ = 0; }
+        Storage& operator=(Storage&& o) noexcept {
+            if (this != &o) {
+                if (d_) sycl::free(d_, gpu::queue());
+                d_ = o.d_;
+                n_ = o.n_;
+                o.d_ = nullptr;
+                o.n_ = 0;
+            }
+            return *this;
+        }
+
+        std::size_t size() const { return n_; }
+        T* data() { return d_; }
+        const T* data() const { return d_; }
+        void resize(std::size_t n) {
+            if (n == n_) return;
+            T* nd = (n > 0) ? sycl::malloc_shared<T>(n, gpu::queue()) : nullptr;
+            if (nd) {
+                const std::size_t m = std::min<std::size_t>(n, n_);
+                for (std::size_t i = 0; i < m; ++i) nd[i] = d_[i];
+                for (std::size_t i = m; i < n; ++i) nd[i] = T{0};
+            }
+            if (d_) sycl::free(d_, gpu::queue());
+            d_ = nd;
+            n_ = n;
+        }
+
+    private:
+        void copyAlloc_(const Storage& o) {
+            d_ = (n_ > 0) ? sycl::malloc_shared<T>(n_, gpu::queue()) : nullptr;
+            for (std::size_t i = 0; i < n_; ++i) d_[i] = o.d_[i];
+        }
+        T* d_ = nullptr;
+        std::size_t n_ = 0;
+    };
+
+    // ---- 算子 (SYCL 内核) ----
+    template<typename T>
+    static void add(const T* a, const T* b, T* out, int n) {
+        gpu::vector_add<T>({a, static_cast<std::size_t>(n)},
+                           {b, static_cast<std::size_t>(n)},
+                           {out, static_cast<std::size_t>(n)});
+    }
+    template<typename T>
+    static void sub(const T* a, const T* b, T* out, int n) {
+        gpu::vector_sub<T>({a, static_cast<std::size_t>(n)},
+                           {b, static_cast<std::size_t>(n)},
+                           {out, static_cast<std::size_t>(n)});
+    }
+    template<typename T>
+    static void scale(T s, const T* v, T* out, int n) {
+        gpu::vector_scale<T>(s, {v, static_cast<std::size_t>(n)},
+                             {out, static_cast<std::size_t>(n)});
+    }
+    template<typename T>
+    static void div(T s, const T* v, T* out, int n) {
+        gpu::vector_divide_scalar<T>(s, {v, static_cast<std::size_t>(n)},
+                                     {out, static_cast<std::size_t>(n)});
+    }
+    template<typename T>
+    static void negate(const T* v, T* out, int n) {
+        gpu::vector_scale<T>(T{-1}, {v, static_cast<std::size_t>(n)},
+                             {out, static_cast<std::size_t>(n)});
+    }
+    template<typename T, int N>
+    static void mat_mul(const T* a, const T* b, T* c) {
+        gpu::matrix_multiply<T, N>({a, std::size_t(N) * N},
+                                   {b, std::size_t(N) * N},
+                                   {c, std::size_t(N) * N});
+    }
+};
 
 } // namespace hlcl
 
