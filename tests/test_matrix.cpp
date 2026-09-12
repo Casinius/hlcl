@@ -227,6 +227,23 @@ void test_vector_matrix_ops() {
     assert(result2[0] == 14.0f);
     assert(result2[1] == 32.0f);
     std::cout << "  ✓ vec * mat^T works" << std::endl;
+
+    // 混合形状乘法 (2x3 * 3x4 -> 2x4): 覆盖 Matrix::operator* 的非平方
+    // 通用回退路径 (平方同型走 BackendTraits 内核, 此路径无内核分派)
+    // A(2x3)={{1,2,3},{4,5,6}}, B(3x4)= rows {1,0,2,0},{0,1,3,0},{1,1,1,1}
+    Mat<2, 3> A23;
+    A23(0, 0) = 1.0f; A23(0, 1) = 2.0f; A23(0, 2) = 3.0f;
+    A23(1, 0) = 4.0f; A23(1, 1) = 5.0f; A23(1, 2) = 6.0f;
+    Mat<3, 4> B34;
+    B34(0, 0) = 1.0f; B34(0, 1) = 0.0f; B34(0, 2) = 2.0f; B34(0, 3) = 0.0f;
+    B34(1, 0) = 0.0f; B34(1, 1) = 1.0f; B34(1, 2) = 3.0f; B34(1, 3) = 0.0f;
+    B34(2, 0) = 1.0f; B34(2, 1) = 1.0f; B34(2, 2) = 1.0f; B34(2, 3) = 1.0f;
+    Mat<2, 4> R24 = A23 * B34;
+    assert(R24(0, 0) == 4.0f);  assert(R24(0, 1) == 5.0f);
+    assert(R24(0, 2) == 11.0f); assert(R24(0, 3) == 3.0f);
+    assert(R24(1, 0) == 10.0f); assert(R24(1, 1) == 11.0f);
+    assert(R24(1, 2) == 29.0f); assert(R24(1, 3) == 6.0f);
+    std::cout << "  ✓ mixed-shape mat * mat works" << std::endl;
 }
 
 int main() {

@@ -61,11 +61,13 @@ void test_vector_arithmetic() {
     assert(dot == 32.0f);
     std::cout << "  ✓ Dot product works" << std::endl;
 
-    // 除法
-    Vec<3, hlcl::Backend::CPU> v6 = v1 / 2.0f;
-    assert(v6[0] == 0.5f);
-    assert(v6[1] == 1.0f);
-    assert(v6[2] == 1.5f);
+    // 除法 (真除法, 非乘倒数): 2 的幂除数下两者等价, 故用 3.0 并选
+    // float32 下 v/3 != v*(1/3) 的被除数 {5,7,10} 钉死语义
+    Vec<3, hlcl::Backend::CPU> v7({5.0f, 7.0f, 10.0f});
+    Vec<3, hlcl::Backend::CPU> v8 = v7 / 3.0f;
+    assert(v8[0] == 5.0f / 3.0f);
+    assert(v8[1] == 7.0f / 3.0f);
+    assert(v8[2] == 10.0f / 3.0f);
     std::cout << "  ✓ Division works" << std::endl;
 }
 

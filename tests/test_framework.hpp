@@ -29,11 +29,12 @@ public:
         }
     }
 
-    // 数值容差断言: 失败条件 |a - b| > tol
+    // 数值容差断言: 失败条件 |a - b| > tol (NaN 视为失败:
+    // !(diff <= tol) 而非 diff > tol, 避免 NaN 比较恒假导致漏报)
     template<typename T>
     void assert_equal(T a, T b, T tol, const std::string& message = "values differ") {
         const T diff = (a > b) ? (a - b) : (b - a);
-        if (diff > tol) {
+        if (!(diff <= tol)) {
             current_result_.failures.push_back(message);
             current_result_.passed = false;
             std::cerr << "[FAIL] " << current_result_.test_name << ": " << message
