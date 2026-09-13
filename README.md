@@ -18,9 +18,6 @@ For one who is very serious about correctness , I build the whole test pipeline 
 ## Requirements
 * C++20 (concepts / span ; `-UNDEBUG`-independent test asserts)
 * Optional backends: AdaptiveCpp (SYCL 2020, `--gpu=y`) and Kompute v0.8.0 (Vulkan compute, `--kompute=y`)
-* GPU kernel backend (`--gpu=y`): `--gpu_backend=omp|opencl|cuda` (default `omp` = OpenMP host, runs without a GPU).
-  CUDA needs an NVIDIA driver + CUDA toolkit on the build machine, plus `--cuda_arch=sm_XX` (GTX 16xx `sm_75`, RTX 30xx `sm_86`, RTX 40xx `sm_89`).
-  Example: `xmake f --gpu=y --gpu_backend=cuda --cuda_arch=sm_86 && xmake -r run_hlcl_gpu`
 
 ## Architecture (since v0.0.2)
 Vector / Matrix / Quaternion are single primary templates parameterized on

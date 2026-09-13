@@ -20,39 +20,16 @@ set_warnings("all", "extra", "pedantic")
 -- 本文件只按 has_config 取值。
 local standalone = (path.normalize(os.projectdir()) == path.normalize(dir))
 
--- GPU 后端取值: 选项仅在独立构建时定义 (被 avbd 根 includes 时缺省 omp)
-function _gpu_backend()
-    local v = get_config("gpu_backend") or has_config("gpu_backend")
-    if type(v) ~= "string" then v = "omp" end
-    return v
-end
-
-function _cuda_arch()
-    local v = get_config("cuda_arch") or has_config("cuda_arch")
-    if type(v) ~= "string" then v = "sm_75" end
-    return v
-end
-
 if standalone then
     option("gpu")
         set_default(false)
         set_showmenu(true)
         set_description("Enable SYCL GPU tests via AdaptiveCpp (acpp)")
     option_end()
-    option("gpu_backend")
-        set_default("omp")
+    option("opencl")
+        set_default(false)
         set_showmenu(true)
-        set_values("omp", "opencl", "cuda")
-        set_description("AdaptiveCpp kernel backend for --gpu=y",
-                        "  omp    — OpenMP CPU host (default, no GPU needed)",
-                        "  opencl — OpenCL devices",
-                        "  cuda   — NVIDIA CUDA (needs driver + CUDA toolkit)")
-    option_end()
-    option("cuda_arch")
-        set_default("sm_75")
-        set_showmenu(true)
-        set_description("SM arch for --gpu_backend=cuda",
-                        "  sm_75 GTX16xx, sm_80/86 A100/RTX30xx, sm_89 RTX40xx")
+        set_description("Use AdaptiveCpp OpenCL backend instead of OpenMP (requires --gpu=y)")
     option_end()
     option("kompute")
         set_default(false)
@@ -70,39 +47,14 @@ if standalone then
         add_ldflags("-fprofile-arcs", {force = true})
     end
 
-    -- mypack 仓库: 自维护的 adaptive_cpp 包 (官方 xmake-repo 尚未收录)。
-    -- 解析顺序: HLCL_MYPACK 环境变量 > avbd 根布局 (../..) > 本机已知位置;
-    -- 旧写法 "../.." 在项目目录迁移后失效 (相对路径按 cwd 解析)。
-    local mypack
-    local candidates = {}
-    if os.getenv("HLCL_MYPACK") then
-        table.insert(candidates, os.getenv("HLCL_MYPACK"))
-    end
-    table.insert(candidates, path.join(dir, "..", ".."))
-    table.insert(candidates, "/home/cyan/Documents/xmake_mypack/adaptive_cpp")
-    table.insert(candidates, "/home/cyan/xmake-repo")
-    for _, p in ipairs(candidates) do
-        if p and os.isfile(path.join(p, "packages", "a", "adaptive_cpp", "xmake.lua")) then
-            mypack = p
-            break
-        end
-    end
-    if mypack then
-        add_repositories("mypack " .. mypack)
-    elseif has_config("gpu") then
-        wprint("未找到 adaptive_cpp 包仓库 (mypack): 设 HLCL_MYPACK=<仓库路径> 后重试; GPU 测试将不可构建")
-    end
+    -- mypack 仓库在 hlcl 的上两级 (adaptive_cpp/)
+    add_repositories("mypack ../..")
     if has_config("kompute") then
         add_requires("kompute v0.8.0")
         add_requires("glslang", {configs = {binaryonly = true}})
     end
-    if not has_config("gpu") and _gpu_backend() ~= "omp" then
-        raise("--gpu_backend=%s 需要同时指定 --gpu=y", _gpu_backend())
-    end
     if has_config("gpu") then
-        add_requires("adaptive_cpp", {configs = {
-            opencl = (_gpu_backend() == "opencl"),
-            cuda   = (_gpu_backend() == "cuda")}})
+        add_requires("adaptive_cpp", {configs = {opencl = has_config("opencl")}})
     end
 end
 
@@ -241,38 +193,10 @@ _hlcl_test("test_error_handling")
 _hlcl_test("test_concurrent")
 
 -- ============ GPU 测试 (仅 --gpu=y) ============
--- AdaptiveCpp (acpp) 驱动编译/链接, 内核后端经 --gpu_backend 选择:
---   omp    — OpenMP CPU host (默认; 无 GPU 也能跑)
---   opencl — OpenCL 设备
---   cuda   — NVIDIA CUDA (构建机需 NVIDIA 驱动 + CUDA toolkit)
 if has_config("gpu") then
-    local acpp_targets = ({
-        ["omp"]    = "--acpp-targets=omp",
-        ["opencl"] = "--acpp-targets=opencl",
-        ["cuda"]   = "--acpp-targets=cuda:" .. _cuda_arch(),
-    })[_gpu_backend()]
-    if not acpp_targets then
-        raise("未知 --gpu_backend=%s (可选: omp | opencl | cuda)", _gpu_backend())
-    end
+    local acpp_targets = has_config("opencl") and "--acpp-targets=opencl" or "--acpp-targets=omp"
 
-    -- acpp 是 clang 包装驱动: 以名为 acpp-clang 的符号链接呈现, xmake 即按
-    -- clang 语义驱动编译/链接 (文件名含 clang 是识别依据)。各目标在自己
-    -- autogen 目录建链, 规避并行构建竞争。
-    local function _use_acpp_driver(target)
-        local pkg = target:pkg("adaptive_cpp")
-        local acpp = pkg and pkg:installdir() and path.join(pkg:installdir(), "bin", "acpp")
-        if not (acpp and os.isfile(acpp)) then
-            raise("adaptive_cpp 包未就绪: 先完成包安装 (xmake -y), 再构建 %s", target:name())
-        end
-        local link = path.join(target:autogendir(), "acpp-clang")
-        os.mkdir(path.directory(link))
-        os.tryrm(link)
-        os.ln(acpp, link)
-        target:set("toolset", "cxx", link)
-        target:set("toolset", "ld",  link)
-    end
-
-    local function _gpu_test(name)
+    function _gpu_core_test(name)
         target(name)
             set_kind("binary")
             add_files(path.join(tests_dir, name .. ".cpp"))
@@ -282,12 +206,28 @@ if has_config("gpu") then
             -- 编译与链接都要传: 链接阶段 acpp 依据它附加对应运行时
             add_cxflags(acpp_targets, {force = true})
             add_ldflags(acpp_targets, {force = true})
-            on_load(_use_acpp_driver)
+            on_load(function (target)
+                -- 经包内 acpp 驱动编译/链接; 链接命名 acpp-clang:
+                -- 让 xmake 按 clang 语义驱动该程序
+                local pkg = target:pkg("adaptive_cpp")
+                if not (pkg and pkg:installdir() and os.isfile(path.join(pkg:installdir(), "bin", "acpp"))) then
+                    wprint("adaptive_cpp 包尚未就绪 (首次配置会自动安装), %s 将在包就绪后以 acpp 驱动重新构建",
+                        target:name())
+                    return
+                end
+                local acpp = path.join(pkg:installdir(), "bin", "acpp")
+                local link = path.join(target:autogendir(), "acpp-clang")
+                os.mkdir(path.directory(link))
+                os.tryrm(link)
+                os.ln(acpp, link)
+                target:set("toolset", "cxx", link)
+                target:set("toolset", "ld",  link)
+            end)
     end
 
-    _gpu_test("test_gpu_matrix_multiply")
-    _gpu_test("test_gpu_core")
-    _gpu_test("test_host_device_copy")
+    _gpu_core_test("test_gpu_matrix_multiply")
+    _gpu_core_test("test_gpu_core")
+    _gpu_core_test("test_host_device_copy")
 end
 
 -- ============ Kompute (Vulkan compute) 测试 (仅 --kompute=y) ============
