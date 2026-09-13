@@ -15,10 +15,17 @@ set_languages("c++20")
 set_warnings("all", "extra", "pedantic")
 
 -- ============ 独立构建判定 ============
--- hlcl 可独立构建/测试 (cd hlcl && xmake ...): 此时选项、mypack 包仓库与
--- 后端依赖由本文件自持; 被 avbd 根 xmake.lua includes 时, 这些由根提供,
--- 本文件只按 has_config 取值。
+-- hlcl 可独立构建/测试 (cd hlcl && xmake ...): 此时选项与后端依赖由本文件
+-- 自持; 被 avbd 根 xmake.lua includes 时, 这些由根提供, 本文件只按 has_config 取值。
 local standalone = (path.normalize(os.projectdir()) == path.normalize(dir))
+
+-- GPU 后端取值: 选项仅在独立构建时定义 (被 avbd 根 includes 时缺省 omp);
+-- has_config 在部分 xmake 版本对字符串选项返回布尔, 统一经 get_config 归一
+function _gpu_backend()
+    local v = get_config("gpu_backend") or has_config("gpu_backend")
+    if type(v) ~= "string" then v = "omp" end
+    return v
+end
 
 if standalone then
     option("gpu")
@@ -26,10 +33,19 @@ if standalone then
         set_showmenu(true)
         set_description("Enable SYCL GPU tests via AdaptiveCpp (acpp)")
     option_end()
-    option("opencl")
-        set_default(false)
+    option("gpu_backend")
+        set_default("omp")
         set_showmenu(true)
-        set_description("Use AdaptiveCpp OpenCL backend instead of OpenMP (requires --gpu=y)")
+        set_values("omp", "cuda")
+        set_description("AdaptiveCpp kernel backend for --gpu=y",
+                        "  omp  — OpenMP CPU host (default, no GPU needed)",
+                        "  cuda — NVIDIA CUDA direct PTX (needs driver + CUDA toolkit)")
+    option_end()
+    option("cuda_arch")
+        set_default("sm_75")
+        set_showmenu(true)
+        set_description("SM arch for --gpu_backend=cuda",
+                        "  sm_75 GTX16xx, sm_80/86 A100/RTX30xx, sm_89 RTX40xx")
     option_end()
     option("kompute")
         set_default(false)
@@ -47,14 +63,18 @@ if standalone then
         add_ldflags("-fprofile-arcs", {force = true})
     end
 
-    -- mypack 仓库在 hlcl 的上两级 (adaptive_cpp/)
-    add_repositories("mypack ../..")
     if has_config("kompute") then
         add_requires("kompute v0.8.0")
         add_requires("glslang", {configs = {binaryonly = true}})
     end
     if has_config("gpu") then
-        add_requires("adaptive_cpp", {configs = {opencl = has_config("opencl")}})
+        -- 官方 xmake-repo 包 (本人提交维护), 不依赖任何私有仓库
+        add_requires("adaptive_cpp", {configs = {cuda = (_gpu_backend() == "cuda")}})
+    end
+    -- 取值硬校验 (set_values 在此 xmake 版本不强制拒绝)
+    local gpu_backend = _gpu_backend()
+    if gpu_backend ~= "omp" and gpu_backend ~= "cuda" then
+        raise("--gpu_backend=%s 无效 (可选: omp | cuda)", gpu_backend)
     end
 end
 
@@ -192,42 +212,96 @@ _hlcl_test("test_special_values")
 _hlcl_test("test_error_handling")
 _hlcl_test("test_concurrent")
 
--- ============ GPU 测试 (仅 --gpu=y) ============
-if has_config("gpu") then
-    local acpp_targets = has_config("opencl") and "--acpp-targets=opencl" or "--acpp-targets=omp"
+-- ============ AdaptiveCpp 工具链 (一等声明) ============
+-- acpp 是 clang 包装驱动: 以独立 toolchain 声明, on_check 宽松放行 (首次
+-- configure 时包可能尚未装好), on_load 定位二进制并注入 toolset 与后端
+-- flags; 缺失时在构建期给出可操作报错, 不静默回退到默认编译器。
+toolchain("acpp")
+    set_kind("standalone")
+    set_description("AdaptiveCpp (acpp) SYCL toolchain")
+    on_check(function (toolchain)
+        -- 与包绑定: 包里带了 adaptive_cpp 依赖, acpp 一定在包内
+        for _, package in ipairs(toolchain:packages()) do
+            local envs = package:envs()
+            if envs and envs.PATH then
+                local acpp = path.join(envs.PATH[1], "acpp")
+                if os.isfile(acpp) then
+                    toolchain:config_set("acpp", acpp)
+                    return true
+                end
+            end
+        end
+        -- 允许系统安装的 acpp (发行版包), 不再读任何环境变量
+        import("lib.detect.find_tool")
+        local t = find_tool("acpp", {version = true})
+        if t and t.program then
+            toolchain:config_set("acpp", t.program)
+            return true
+        end
+        return false
+    end)
+    on_load(function (toolchain)
+        import("core.project.config")
 
-    function _gpu_core_test(name)
+        local acpp = toolchain:config("acpp")
+        if not (acpp and os.isfile(acpp)) then
+            raise("未找到 acpp 驱动: 确认 adaptive_cpp 包已安装 (xmake -y) 或系统装有 AdaptiveCpp")
+        end
+
+        -- xmake 按可执行文件名加载对应工具脚本 (编译器语义);
+        -- acpp 是 clang 包装驱动, 故以 clang 命名的链接呈现给它。
+        -- 在此统一建一处链接 (构建目录), 取代旧 per-target on_load hack。
+        local link = path.join(os.projectdir(), "build", "acpp-clang")
+        os.mkdir(path.directory(link))
+        os.tryrm(link)
+        os.ln(acpp, link)
+
+        toolchain:set("toolset", "cc",  link)
+        toolchain:set("toolset", "cxx", link)
+        toolchain:set("toolset", "ld",  link)
+        toolchain:set("toolset", "sh",  link)
+
+        -- 后端 flags: 编译与链接都要传, 链接阶段 acpp 依据它附加对应运行时。
+        -- 注意: toolchain 回调在独立沙箱执行, 无法访问脚本全局, 故内联取值。
+        -- 仅保留直译后端: omp (主机直译) 与 cuda (PTX 直译, 需 CUDA toolkit)。
+        local backend = config.get("gpu_backend")
+        if type(backend) ~= "string" then backend = "omp" end
+        local arch = config.get("cuda_arch")
+        if type(arch) ~= "string" then arch = "sm_75" end
+        local targets
+        if backend == "cuda" then
+            import("detect.sdks.find_cuda")
+            local sdk = find_cuda()
+            if not (sdk and sdk.sdkdir) then
+                raise("gpu_backend=cuda 需要 CUDA toolkit: 未检测到 SDK, 请安装 CUDA 或 xmake f --cuda=<SDK目录>")
+            end
+            targets = "--acpp-targets=cuda:" .. arch .. " --acpp-cuda-path=" .. sdk.sdkdir
+        else
+            targets = "--acpp-targets=omp"
+        end
+        toolchain:add("cxflags", targets)
+        toolchain:add("ldflags", targets)
+    end)
+toolchain_end()
+
+-- ============ GPU 测试 (仅 --gpu=y) ============
+-- AdaptiveCpp (acpp) 直译后端经 --gpu_backend 选择 (omp | cuda);
+-- 工具链与后端 flags 全部由 toolchain("acpp") 声明, target 保持纯声明式。
+if has_config("gpu") then
+    local function _gpu_test(name)
         target(name)
             set_kind("binary")
             add_files(path.join(tests_dir, name .. ".cpp"))
             add_deps("hlcl")
             add_packages("adaptive_cpp")
             add_defines("HLCL_GPU_ENABLED")
-            -- 编译与链接都要传: 链接阶段 acpp 依据它附加对应运行时
-            add_cxflags(acpp_targets, {force = true})
-            add_ldflags(acpp_targets, {force = true})
-            on_load(function (target)
-                -- 经包内 acpp 驱动编译/链接; 链接命名 acpp-clang:
-                -- 让 xmake 按 clang 语义驱动该程序
-                local pkg = target:pkg("adaptive_cpp")
-                if not (pkg and pkg:installdir() and os.isfile(path.join(pkg:installdir(), "bin", "acpp"))) then
-                    wprint("adaptive_cpp 包尚未就绪 (首次配置会自动安装), %s 将在包就绪后以 acpp 驱动重新构建",
-                        target:name())
-                    return
-                end
-                local acpp = path.join(pkg:installdir(), "bin", "acpp")
-                local link = path.join(target:autogendir(), "acpp-clang")
-                os.mkdir(path.directory(link))
-                os.tryrm(link)
-                os.ln(acpp, link)
-                target:set("toolset", "cxx", link)
-                target:set("toolset", "ld",  link)
-            end)
+            -- acpp@包名: 把 adaptive_cpp 包实例绑定进工具链 (驱动即包内 bin/acpp)
+            set_toolchains("acpp@adaptive_cpp")
     end
 
-    _gpu_core_test("test_gpu_matrix_multiply")
-    _gpu_core_test("test_gpu_core")
-    _gpu_core_test("test_host_device_copy")
+    _gpu_test("test_gpu_matrix_multiply")
+    _gpu_test("test_gpu_core")
+    _gpu_test("test_host_device_copy")
 end
 
 -- ============ Kompute (Vulkan compute) 测试 (仅 --kompute=y) ============
