@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstddef>
+
 namespace hlcl {
 
 // 后端抽象接口
@@ -15,6 +17,9 @@ enum class Backend {
 // 浮点标量类型别名
 using Float32 = float;
 using Float64 = double;
+
+// 统一索引/维度类型 (Eigen::Index 同义): 有符号, Vector 负值=动态维度
+using Index = std::ptrdiff_t;
 
 // 版本常量 (test_ode.cpp 断言 0.0.2)
 constexpr int HLCL_VERSION_MAJOR = 0;

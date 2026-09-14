@@ -108,66 +108,66 @@ inline std::vector<std::shared_ptr<kp::Tensor>> as_tensors(
 // Host fallbacks for non-float types: run the same math over tensor data().
 // (Kompute 0.8.0 cannot enable shaderFloat64; keep results correct.)
 // ---------------------------------------------------------------------------
-template<typename T, int N>
+template<typename T, Index N>
 inline void matrix_multiply_host(const T* A, const T* B, T* C) {
-    for (int i = 0; i < N; ++i)
-        for (int j = 0; j < N; ++j) {
+    for (Index i = 0; i < N; ++i)
+        for (Index j = 0; j < N; ++j) {
             T s = T{0};
-            for (int k = 0; k < N; ++k) s += A[i * N + k] * B[k * N + j];
+            for (Index k = 0; k < N; ++k) s += A[i * N + k] * B[k * N + j];
             C[i * N + j] = s;
         }
 }
 
-template<typename T, int N>
+template<typename T, Index N>
 inline void matrix_inverse_host(const T* A, T* C) {
     T aug[N][2 * N];
-    for (int i = 0; i < N; ++i)
-        for (int j = 0; j < N; ++j) {
+    for (Index i = 0; i < N; ++i)
+        for (Index j = 0; j < N; ++j) {
             aug[i][j] = A[i * N + j];
             aug[i][N + j] = (i == j) ? T{1} : T{0};
         }
-    for (int k = 0; k < N; ++k) {
-        int p = k;
+    for (Index k = 0; k < N; ++k) {
+        Index p = k;
         T best = std::abs(aug[k][k]);
-        for (int r = k + 1; r < N; ++r)
+        for (Index r = k + 1; r < N; ++r)
             if (std::abs(aug[r][k]) > best) { best = std::abs(aug[r][k]); p = r; }
         if (best == T{0}) {
-            for (int i = 0; i < N * N; ++i) C[i] = T{0};
+            for (Index i = 0; i < N * N; ++i) C[i] = T{0};
             return;
         }
         if (p != k)
-            for (int j = 0; j < 2 * N; ++j) std::swap(aug[k][j], aug[p][j]);
+            for (Index j = 0; j < 2 * N; ++j) std::swap(aug[k][j], aug[p][j]);
         T piv = aug[k][k];
-        for (int j = 0; j < 2 * N; ++j) aug[k][j] /= piv;
-        for (int r = 0; r < N; ++r) {
+        for (Index j = 0; j < 2 * N; ++j) aug[k][j] /= piv;
+        for (Index r = 0; r < N; ++r) {
             if (r == k) continue;
             T f = aug[r][k];
-            for (int j = 0; j < 2 * N; ++j) aug[r][j] -= f * aug[k][j];
+            for (Index j = 0; j < 2 * N; ++j) aug[r][j] -= f * aug[k][j];
         }
     }
-    for (int i = 0; i < N; ++i)
-        for (int j = 0; j < N; ++j) C[i * N + j] = aug[i][N + j];
+    for (Index i = 0; i < N; ++i)
+        for (Index j = 0; j < N; ++j) C[i * N + j] = aug[i][N + j];
 }
 
-template<typename T, int N>
+template<typename T, Index N>
 inline T matrix_determinant_host(const T* A) {
     T m[N * N];
-    for (int i = 0; i < N * N; ++i) m[i] = A[i];
+    for (Index i = 0; i < N * N; ++i) m[i] = A[i];
     T det = T{1};
-    for (int k = 0; k < N; ++k) {
-        int p = k;
+    for (Index k = 0; k < N; ++k) {
+        Index p = k;
         T best = std::abs(m[k * N + k]);
-        for (int r = k + 1; r < N; ++r)
+        for (Index r = k + 1; r < N; ++r)
             if (std::abs(m[r * N + k]) > best) { best = std::abs(m[r * N + k]); p = r; }
         if (best == T{0}) return T{0};
         if (p != k) {
-            for (int j = 0; j < N; ++j) std::swap(m[k * N + j], m[p * N + j]);
+            for (Index j = 0; j < N; ++j) std::swap(m[k * N + j], m[p * N + j]);
             det = -det;
         }
         det *= m[k * N + k];
-        for (int r = k + 1; r < N; ++r) {
+        for (Index r = k + 1; r < N; ++r) {
             T f = m[r * N + k] / m[k * N + k];
-            for (int j = k; j < N; ++j) m[r * N + j] -= f * m[k * N + j];
+            for (Index j = k; j < N; ++j) m[r * N + j] -= f * m[k * N + j];
         }
     }
     return det;
@@ -176,7 +176,7 @@ inline T matrix_determinant_host(const T* A) {
 // ---------------------------------------------------------------------------
 // Matrix kernels: C = A * B   (all row-major, N x N, float only)
 // ---------------------------------------------------------------------------
-template<typename T, int N>
+template<typename T, Index N>
 inline void matrix_multiply(const TensorPtr<T>& A, const TensorPtr<T>& B,
     const TensorPtr<T>& C) {
     if (!kDeviceSupported<T>) return; // caller falls back to host
@@ -186,7 +186,7 @@ inline void matrix_multiply(const TensorPtr<T>& A, const TensorPtr<T>& B,
         std::array<uint32_t, 3>{uint32_t((N + 15) / 16), uint32_t((N + 15) / 16), 1});
 }
 
-template<typename T, int N>
+template<typename T, Index N>
 inline void matrix_multiply(const T* A, const T* B, T* C) {
     if (!kDeviceSupported<T>) {
         matrix_multiply_host<T, N>(A, B, C);
@@ -205,7 +205,7 @@ inline void matrix_multiply(const T* A, const T* B, T* C) {
 // Matrix kernels: inverse (Gauss-Jordan, partial pivoting) — float only.
 // Singular input writes a zero matrix, mirroring the CPU/GPU contract.
 // ---------------------------------------------------------------------------
-template<typename T, int N>
+template<typename T, Index N>
 inline void matrix_inverse(const TensorPtr<T>& A, const TensorPtr<T>& C) {
     if (!kDeviceSupported<T>) return;
     const int n = N;
@@ -214,7 +214,7 @@ inline void matrix_inverse(const TensorPtr<T>& A, const TensorPtr<T>& C) {
         std::array<uint32_t, 3>{1, 1, 1});
 }
 
-template<typename T, int N>
+template<typename T, Index N>
 inline void matrix_inverse(const T* A, T* C) {
     if (!kDeviceSupported<T>) {
         matrix_inverse_host<T, N>(A, C);
@@ -230,7 +230,7 @@ inline void matrix_inverse(const T* A, T* C) {
 // ---------------------------------------------------------------------------
 // Matrix kernel: determinant (single invocation) — float only. Returns T.
 // ---------------------------------------------------------------------------
-template<typename T, int N>
+template<typename T, Index N>
 inline T matrix_determinant(const TensorPtr<T>& A) {
     if (!kDeviceSupported<T>) return T{0};
     auto out = make_tensor<T>(1);
@@ -241,7 +241,7 @@ inline T matrix_determinant(const TensorPtr<T>& A) {
     return out->data()[0];
 }
 
-template<typename T, int N>
+template<typename T, Index N>
 inline T matrix_determinant(const T* A) {
     if (!kDeviceSupported<T>) return matrix_determinant_host<T, N>(A);
     auto tA = make_tensor<T>(std::size_t(N) * N);
@@ -347,7 +347,7 @@ inline void print_kompute_device_info() {
 // non-float: 宿主循环 (Kompute 0.8.0 无 shaderFloat64)。
 // ---------------------------------------------------------------------------
 template<typename T>
-inline void vector_add(const T* a, const T* b, T* out, int n) {
+inline void vector_add(const T* a, const T* b, T* out, Index n) {
     if (n <= 0) return;
     if constexpr (kompute::kDeviceSupported<T>) {
         auto ta = kompute::make_tensor<T>(std::size_t(n));
@@ -358,12 +358,12 @@ inline void vector_add(const T* a, const T* b, T* out, int n) {
         kompute::vector_add<T>(ta, tb, to);
         std::memcpy(out, to->data(), sizeof(T) * std::size_t(n));
     } else {
-        for (int i = 0; i < n; ++i) out[i] = a[i] + b[i];
+        for (Index i = 0; i < n; ++i) out[i] = a[i] + b[i];
     }
 }
 
 template<typename T>
-inline void vector_sub(const T* a, const T* b, T* out, int n) {
+inline void vector_sub(const T* a, const T* b, T* out, Index n) {
     if (n <= 0) return;
     if constexpr (kompute::kDeviceSupported<T>) {
         auto ta = kompute::make_tensor<T>(std::size_t(n));
@@ -374,12 +374,12 @@ inline void vector_sub(const T* a, const T* b, T* out, int n) {
         kompute::vector_sub<T>(ta, tb, to);
         std::memcpy(out, to->data(), sizeof(T) * std::size_t(n));
     } else {
-        for (int i = 0; i < n; ++i) out[i] = a[i] - b[i];
+        for (Index i = 0; i < n; ++i) out[i] = a[i] - b[i];
     }
 }
 
 template<typename T>
-inline void vector_scale(T s, const T* v, T* out, int n) {
+inline void vector_scale(T s, const T* v, T* out, Index n) {
     if (n <= 0) return;
     if constexpr (kompute::kDeviceSupported<T>) {
         auto tv = kompute::make_tensor<T>(std::size_t(n));
@@ -388,7 +388,7 @@ inline void vector_scale(T s, const T* v, T* out, int n) {
         kompute::vector_scale<T>(s, tv, to);
         std::memcpy(out, to->data(), sizeof(T) * std::size_t(n));
     } else {
-        for (int i = 0; i < n; ++i) out[i] = s * v[i];
+        for (Index i = 0; i < n; ++i) out[i] = s * v[i];
     }
 }
 
@@ -398,7 +398,7 @@ inline void vector_scale(T s, const T* v, T* out, int n) {
 // ---------------------------------------------------------------------------
 template<>
 struct BackendTraits<Backend::Kompute> {
-    template<typename T, int Cap>
+    template<typename T, Index Cap>
     class Storage {
         static_assert(Cap > 0, "fixed storage requires Cap > 0");
     public:
@@ -464,26 +464,26 @@ struct BackendTraits<Backend::Kompute> {
 
     // ---- 算子 ----
     template<typename T>
-    static void add(const T* a, const T* b, T* out, int n) {
+    static void add(const T* a, const T* b, T* out, Index n) {
         vector_add<T>(a, b, out, n);
     }
     template<typename T>
-    static void sub(const T* a, const T* b, T* out, int n) {
+    static void sub(const T* a, const T* b, T* out, Index n) {
         vector_sub<T>(a, b, out, n);
     }
     template<typename T>
-    static void scale(T s, const T* v, T* out, int n) {
+    static void scale(T s, const T* v, T* out, Index n) {
         vector_scale<T>(s, v, out, n);
     }
     template<typename T>
-    static void div(T s, const T* v, T* out, int n) {
-        for (int i = 0; i < n; ++i) out[i] = v[i] / s;   // 宿主真除法
+    static void div(T s, const T* v, T* out, Index n) {
+        for (Index i = 0; i < n; ++i) out[i] = v[i] / s;   // 宿主真除法
     }
     template<typename T>
-    static void negate(const T* v, T* out, int n) {
+    static void negate(const T* v, T* out, Index n) {
         kompute::vector_scale<T>(T{-1}, v, out, n);
     }
-    template<typename T, int N>
+    template<typename T, Index N>
     static void mat_mul(const T* a, const T* b, T* c) {
         kompute::matrix_multiply<T, N>(a, b, c);
     }

@@ -29,7 +29,7 @@ struct BackendTraits;   // 仅声明; 特化见上
 template<>
 struct BackendTraits<Backend::CPU> {
     // 编译期固定容量: 内联 std::array, 零堆分配
-    template<typename T, int Cap>
+    template<typename T, Index Cap>
     class Storage {
         static_assert(Cap > 0, "fixed storage requires Cap > 0");
     public:
@@ -56,31 +56,31 @@ struct BackendTraits<Backend::CPU> {
 
     // ---- 算子 (主机循环, 参考实现) ----
     template<typename T>
-    static void add(const T* a, const T* b, T* out, int n) {
-        for (int i = 0; i < n; ++i) out[i] = a[i] + b[i];
+    static void add(const T* a, const T* b, T* out, Index n) {
+        for (Index i = 0; i < n; ++i) out[i] = a[i] + b[i];
     }
     template<typename T>
-    static void sub(const T* a, const T* b, T* out, int n) {
-        for (int i = 0; i < n; ++i) out[i] = a[i] - b[i];
+    static void sub(const T* a, const T* b, T* out, Index n) {
+        for (Index i = 0; i < n; ++i) out[i] = a[i] - b[i];
     }
     template<typename T>
-    static void scale(T s, const T* v, T* out, int n) {
-        for (int i = 0; i < n; ++i) out[i] = s * v[i];
+    static void scale(T s, const T* v, T* out, Index n) {
+        for (Index i = 0; i < n; ++i) out[i] = s * v[i];
     }
     template<typename T>
-    static void div(T s, const T* v, T* out, int n) {
-        for (int i = 0; i < n; ++i) out[i] = v[i] / s;
+    static void div(T s, const T* v, T* out, Index n) {
+        for (Index i = 0; i < n; ++i) out[i] = v[i] / s;
     }
     template<typename T>
-    static void negate(const T* v, T* out, int n) {
-        for (int i = 0; i < n; ++i) out[i] = -v[i];
+    static void negate(const T* v, T* out, Index n) {
+        for (Index i = 0; i < n; ++i) out[i] = -v[i];
     }
-    template<typename T, int N>
+    template<typename T, Index N>
     static void mat_mul(const T* a, const T* b, T* c) {
-        for (int i = 0; i < N; ++i)
-            for (int j = 0; j < N; ++j) {
+        for (Index i = 0; i < N; ++i)
+            for (Index j = 0; j < N; ++j) {
                 T s = T{0};
-                for (int k = 0; k < N; ++k) s += a[i * N + k] * b[k * N + j];
+                for (Index k = 0; k < N; ++k) s += a[i * N + k] * b[k * N + j];
                 c[i * N + j] = s;
             }
     }

@@ -10,7 +10,7 @@ namespace hlcl {
 // 标量导数广播语义的 ODE 求解器基类 (README / 测试共同约定的 API):
 // computeDerivative(t, state) 返回标量 S, 该标量作为 dx/dt 广播到每个状态分量。
 // 当 N == 1 时退化为经典标量 RK4/Euler/Heun 积分器。
-template<typename S = Float32, int N = 2>
+template<typename S = Float32, Index N = 2>
 class ODESolver {
 public:
     using Scalar = S;
@@ -22,17 +22,17 @@ public:
     [[nodiscard]] State solveEuler(S t, const State& x0, S dt) const {
         const S f = computeDerivative(t, x0);
         State y = x0;
-        for (int i = 0; i < N; ++i) y[i] = x0[i] + dt * f;
+        for (Index i = 0; i < N; ++i) y[i] = x0[i] + dt * f;
         return y;
     }
 
     [[nodiscard]] State solveHeun(S t, const State& x0, S dt) const {
         const S k1 = computeDerivative(t, x0);
         State yp = x0;
-        for (int i = 0; i < N; ++i) yp[i] = x0[i] + dt * k1;
+        for (Index i = 0; i < N; ++i) yp[i] = x0[i] + dt * k1;
         const S k2 = computeDerivative(t + dt, yp);
         State y = x0;
-        for (int i = 0; i < N; ++i) y[i] = x0[i] + dt * (k1 + k2) / S{2};
+        for (Index i = 0; i < N; ++i) y[i] = x0[i] + dt * (k1 + k2) / S{2};
         return y;
     }
 
@@ -44,18 +44,18 @@ public:
         // k1 = f(t, y)
         const S k1 = computeDerivative(t, y);
         // k2 = f(t + h/2, y + h*k1/2)
-        for (int i = 0; i < N; ++i) y[i] = x0[i] + half * k1;
+        for (Index i = 0; i < N; ++i) y[i] = x0[i] + half * k1;
         const S k2 = computeDerivative(t + half, y);
         // k3 = f(t + h/2, y + h*k2/2)
-        for (int i = 0; i < N; ++i) y[i] = x0[i] + half * k2;
+        for (Index i = 0; i < N; ++i) y[i] = x0[i] + half * k2;
         const S k3 = computeDerivative(t + half, y);
         // k4 = f(t + h, y + h*k3)
-        for (int i = 0; i < N; ++i) y[i] = x0[i] + h * k3;
+        for (Index i = 0; i < N; ++i) y[i] = x0[i] + h * k3;
         const S k4 = computeDerivative(t + h, y);
 
         const S sixth = h / S{6};
         y = x0;
-        for (int i = 0; i < N; ++i) y[i] = x0[i] + sixth * (k1 + S{2} * k2 + S{2} * k3 + k4);
+        for (Index i = 0; i < N; ++i) y[i] = x0[i] + sixth * (k1 + S{2} * k2 + S{2} * k3 + k4);
         return y;
     }
 
@@ -64,13 +64,13 @@ public:
     [[nodiscard]] Matrix<S, N, N> jacobian(S t, const State& x) const {
         Matrix<S, N, N> J;
         State xp = x, xm = x;
-        for (int j = 0; j < N; ++j) {
+        for (Index j = 0; j < N; ++j) {
             // float 中央差分的舍入误差 ~ ulp(|f|)/eps; eps 取 1e-2 量级
             const S eps = S{1e-2} * (S{1} + std::abs(x[j]));
             xp[j] = x[j] + eps;
             xm[j] = x[j] - eps;
             const S g = (computeDerivative(t, xp) - computeDerivative(t, xm)) / (S{2} * eps);
-            for (int i = 0; i < N; ++i) J(i, j) = g;
+            for (Index i = 0; i < N; ++i) J(i, j) = g;
             xp[j] = x[j];
             xm[j] = x[j];
         }
@@ -79,16 +79,16 @@ public:
 
     // 把完整状态解包为位置/速度视图
     template<typename VecP, typename VecV>
-    void unpackState(const State& full, int nPos, int nVel, VecP& pos, VecV& vel) const {
-        for (int k = 0; k < nPos; ++k) pos[k] = full[k];
-        for (int k = 0; k < nVel; ++k) vel[k] = full[nPos + k];
+    void unpackState(const State& full, Index nPos, Index nVel, VecP& pos, VecV& vel) const {
+        for (Index k = 0; k < nPos; ++k) pos[k] = full[k];
+        for (Index k = 0; k < nVel; ++k) vel[k] = full[nPos + k];
     }
 
     template<typename VecP, typename VecV>
-    [[nodiscard]] State packState(const VecP& pos, int nPos, const VecV& vel, int nVel) const {
+    [[nodiscard]] State packState(const VecP& pos, Index nPos, const VecV& vel, Index nVel) const {
         State full;
-        for (int k = 0; k < nPos; ++k) full[k] = pos[k];
-        for (int k = 0; k < nVel; ++k) full[nPos + k] = vel[k];
+        for (Index k = 0; k < nPos; ++k) full[k] = pos[k];
+        for (Index k = 0; k < nVel; ++k) full[nPos + k] = vel[k];
         return full;
     }
 
@@ -128,12 +128,12 @@ private:
 // 遗留 EulerSolver (smoke_test.cpp 使用): y' = y0 + dydt * dt
 class EulerSolver {
 public:
-    template<typename T, int Size, Backend B>
+    template<typename T, std::ptrdiff_t Size, Backend B>
     Vector<T, Size, B> step(const Vector<T, Size, B>& dydt, T dt,
                             const Vector<T, Size, B>& y0) const {
         assert(dydt.size() == y0.size() && "EulerSolver: size mismatch");
         Vector<T, Size, B> y = y0;
-        for (int i = 0; i < y.size(); ++i) y[i] = y0[i] + dt * dydt[i];
+        for (Index i = 0; i < y.size(); ++i) y[i] = y0[i] + dt * dydt[i];
         return y;
     }
 };

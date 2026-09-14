@@ -246,6 +246,54 @@ void test_vector_matrix_ops() {
     std::cout << "  ✓ mixed-shape mat * mat works" << std::endl;
 }
 
+// ---- 类型安全: 行列强索引 (hlcl/strong_index.hpp) ----
+template<typename M, typename I, typename V>
+concept RowSettable = requires(M& m, I i, V& v) { m.setRow(i, v); };
+template<typename M, typename I, typename V>
+concept ColSettable = requires(M& m, I i, V& v) { m.setCol(i, v); };
+
+static void test_matrix_type_safety() {
+    using M = hlcl::Matrix<float, 2, 3>;
+    using hlcl::row_index;
+    using hlcl::col_index;
+    M m{1, 2, 3,
+        4, 5, 6};   // 行优先扁平初始化
+
+    // 编译期: 重载集的 invocability 即类型契约
+    static_assert(std::is_invocable_v<const M&, int, int>,
+                  "整数对必须可用 (Eigen 兼容)");
+    static_assert(std::is_invocable_v<const M&, row_index, col_index>,
+                  "强类型对必须可用");
+    static_assert(!std::is_invocable_v<const M&, col_index, row_index>,
+                  "行列互换必须编译失败");
+    static_assert(!std::is_invocable_v<const M&, row_index, int> &&
+                  !std::is_invocable_v<const M&, int, col_index>,
+                  "强类型与裸 int 混用必须编译失败");
+    static_assert(!std::is_invocable_v<const M&, row_index, row_index>,
+                  "双 row_index 必须编译失败");
+    static_assert(RowSettable<M, row_index, std::vector<float>> &&
+                  !RowSettable<M, col_index, std::vector<float>>,
+                  "setRow 只收行号");
+    static_assert(ColSettable<M, col_index, std::vector<float>> &&
+                  !ColSettable<M, row_index, std::vector<float>>,
+                  "setCol 只收列号");
+    static_assert(!std::is_convertible_v<int, row_index> &&
+                  !std::is_constructible_v<col_index, row_index>,
+                  "索引类型相互隔离");
+
+    // 运行期: 字面量/显式构造读写一致
+    assert(m(1_r, 2_c) == 6.0f);
+    assert(m(row_index{1}, col_index{0}) == 4.0f);
+    m(row_index{1}, col_index{2}) = 9.0f;
+    assert(m(1, 2) == 9.0f);
+
+    const std::vector<float> row1 = {7.0f, 8.0f, 9.0f};
+    m.setRow(row_index{1}, row1);
+    assert(m(1_r, 0_c) == 7.0f && m(1_r, 2_c) == 9.0f);
+
+    std::cout << "  ✓ row/col strong index type safety" << std::endl;
+}
+
 int main() {
     std::cout << "=== AVBD Matrix Tests ===" << std::endl << std::endl;
 
@@ -256,6 +304,7 @@ int main() {
     test_matrix_transpose();
     test_matrix_special();
     test_vector_matrix_ops();
+    test_matrix_type_safety();
 
     std::cout << "\n✓ All matrix tests passed!" << std::endl;
 

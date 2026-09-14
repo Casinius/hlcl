@@ -12,14 +12,14 @@ using namespace hlcl;
 using namespace hlcl::test;
 
 // 本地辅助 (0 向量 -> 零向量, 不抛异常; 与 inverse 奇异->零矩阵约定一致)
-template<int N>
+template<Index N>
 static Vecd<N> normalize_safe(const Vecd<N>& v) {
     double len = v.norm();
     if (len == 0.0) return v;
     return v / len;
 }
 
-template<int R, int C>
+template<Index R, Index C>
 static bool matrix_is_zero(const Matrix<double, R, C, Backend::CPU>& m) {
     for (int i = 0; i < R; ++i)
         for (int j = 0; j < C; ++j)

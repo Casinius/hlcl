@@ -1,12 +1,10 @@
--- hlcl — 仿 Eigen 风格 header-only 代数库 (独立子项目, 以内嵌包形式分发)
+-- hlcl — 仿 Eigen 风格 header-only 代数库 (本目录自包含)
 -- 向量/矩阵/四元数/ODE 求解器与 SYCL GPU / Vulkan compute 内核层 (编译期开关
--- HLCL_GPU_ENABLED / HLCL_KOMPUTE_ENABLED, 见 tests/xmake.lua), 纯 C++17,
--- 零第三方依赖。
+-- HLCL_GPU_ENABLED / HLCL_KOMPUTE_ENABLED), 纯 C++17, 零第三方依赖。
 --
--- 三种消费方式:
---   * 本仓库内 (avbd 引擎/测试): includes() 引入本文件, target 依赖 add_deps("hlcl")
---   * 其他 xmake 项目: 复制本文件中的 package("hlcl") 定义, 或经包仓库分发后
---     add_requires("hlcl")
+-- 消费方式:
+--   * 本目录内构建/测试: xmake && xmake run run_hlcl_tests
+--   * 其他 xmake 项目: add_requires("hlcl") (内嵌包定义见本文件)
 -- 本包定义同时在本文件内给出 (内嵌包), `xmake require -y hlcl` 即可验证安装。
 local dir = os.scriptdir()
 
@@ -99,9 +97,9 @@ package("hlcl")
         end
     end)
 
-    -- 内嵌本地包: 直接从本子项目复制头文件 (无需远端 URL)
+    -- 内嵌本地包: 直接从本目录复制头文件 (无需远端 URL)
     on_install(function (package)
-        os.cp(path.join(os.projectdir(), "hlcl", "include"), package:installdir())
+        os.cp(path.join(dir, "include"), package:installdir())
     end)
 
     on_test(function (package)

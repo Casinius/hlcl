@@ -70,7 +70,7 @@ inline sycl::queue& queue() {
 // ---------------------------------------------------------------------------
 // Matrix kernels: C = A * B   (all row-major, N x N)
 // ---------------------------------------------------------------------------
-template<typename T, int N>
+template<typename T, Index N>
 inline void matrix_multiply(std::span<const T> A, std::span<const T> B,
                             std::span<T> C) {
     const T* pA = A.data();
@@ -78,10 +78,10 @@ inline void matrix_multiply(std::span<const T> A, std::span<const T> B,
     T* pC = C.data();
     queue().submit([&](sycl::handler& h) {
         h.parallel_for(sycl::range<2>(N, N), [=](sycl::id<2> idx) {
-            const int i = static_cast<int>(idx[0]);
-            const int j = static_cast<int>(idx[1]);
+            const Index i = static_cast<Index>(idx[0]);
+            const Index j = static_cast<Index>(idx[1]);
             T s = T{0};
-            for (int k = 0; k < N; ++k) s += pA[i * N + k] * pB[k * N + j];
+            for (Index k = 0; k < N; ++k) s += pA[i * N + k] * pB[k * N + j];
             pC[i * N + j] = s;
         });
     });
@@ -92,46 +92,46 @@ inline void matrix_multiply(std::span<const T> A, std::span<const T> B,
 // Matrix inverse via Gauss-Jordan elimination (single work item).
 // Singular matrices produce a zero matrix (matches CPU inverse() contract).
 // ---------------------------------------------------------------------------
-template<typename T, int N>
+template<typename T, Index N>
 inline void matrix_inverse(std::span<const T> A_in, std::span<T> C_out) {
     const T* pA = A_in.data();
     T* pC = C_out.data();
     queue().submit([&](sycl::handler& h) {
         h.single_task([=]() {
             T m[N * N];
-            for (int i = 0; i < N * N; ++i) m[i] = pA[i];
+            for (Index i = 0; i < N * N; ++i) m[i] = pA[i];
             T inv[N * N];
-            for (int i = 0; i < N; ++i)
-                for (int j = 0; j < N; ++j) inv[i * N + j] = (i == j) ? T{1} : T{0};
-            for (int col = 0; col < N; ++col) {
-                int piv = col;
+            for (Index i = 0; i < N; ++i)
+                for (Index j = 0; j < N; ++j) inv[i * N + j] = (i == j) ? T{1} : T{0};
+            for (Index col = 0; col < N; ++col) {
+                std::size_t piv = col;
                 T mx = std::abs(m[col * N + col]);
-                for (int r = col + 1; r < N; ++r) {
+                for (Index r = col + 1; r < N; ++r) {
                     const T v = std::abs(m[r * N + col]);
                     if (v > mx) { mx = v; piv = r; }
                 }
                 if (mx == T{0}) {
-                    for (int i = 0; i < N * N; ++i) pC[i] = T{0};
+                    for (Index i = 0; i < N * N; ++i) pC[i] = T{0};
                     return; // singular
                 }
                 if (piv != col) {
-                    for (int j = 0; j < N; ++j) {
+                    for (Index j = 0; j < N; ++j) {
                         T t = m[col * N + j]; m[col * N + j] = m[piv * N + j]; m[piv * N + j] = t;
                         t = inv[col * N + j]; inv[col * N + j] = inv[piv * N + j]; inv[piv * N + j] = t;
                     }
                 }
                 const T d = m[col * N + col];
-                for (int j = 0; j < N; ++j) { m[col * N + j] /= d; inv[col * N + j] /= d; }
-                for (int r = 0; r < N; ++r) {
+                for (Index j = 0; j < N; ++j) { m[col * N + j] /= d; inv[col * N + j] /= d; }
+                for (Index r = 0; r < N; ++r) {
                     if (r == col) continue;
                     const T f = m[r * N + col];
-                    for (int j = 0; j < N; ++j) {
+                    for (Index j = 0; j < N; ++j) {
                         m[r * N + j] -= f * m[col * N + j];
                         inv[r * N + j] -= f * inv[col * N + j];
                     }
                 }
             }
-            for (int i = 0; i < N * N; ++i) pC[i] = inv[i];
+            for (Index i = 0; i < N * N; ++i) pC[i] = inv[i];
         });
     });
     queue().wait();
@@ -140,25 +140,25 @@ inline void matrix_inverse(std::span<const T> A_in, std::span<T> C_out) {
 // ---------------------------------------------------------------------------
 // Matrix determinant via Gaussian elimination with partial pivoting.
 // ---------------------------------------------------------------------------
-template<typename T, int N>
+template<typename T, Index N>
 [[nodiscard]] inline T matrix_determinant(std::span<const T> A_in) {
     const T* pA = A_in.data();
     T* d = sycl::malloc_shared<T>(1, queue());
     queue().submit([=](sycl::handler& h) {
         h.single_task([=]() {
             T m[N * N];
-            for (int i = 0; i < N * N; ++i) m[i] = pA[i];
+            for (Index i = 0; i < N * N; ++i) m[i] = pA[i];
             T result = T{1};
-            for (int k = 0; k < N; ++k) {
-                int piv = k;
+            for (Index k = 0; k < N; ++k) {
+                std::size_t piv = k;
                 T mx = std::abs(m[k * N + k]);
-                for (int r = k + 1; r < N; ++r) {
+                for (Index r = k + 1; r < N; ++r) {
                     const T v = std::abs(m[r * N + k]);
                     if (v > mx) { mx = v; piv = r; }
                 }
                 if (mx == T{0}) { d[0] = T{0}; return; }
                 if (piv != k) {
-                    for (int j = 0; j < N; ++j) {
+                    for (Index j = 0; j < N; ++j) {
                         const T t = m[k * N + j];
                         m[k * N + j] = m[piv * N + j];
                         m[piv * N + j] = t;
@@ -166,9 +166,9 @@ template<typename T, int N>
                     result = -result;
                 }
                 const T pivot = m[k * N + k];
-                for (int r = k + 1; r < N; ++r) {
+                for (Index r = k + 1; r < N; ++r) {
                     const T f = m[r * N + k] / pivot;
-                    for (int j = k; j < N; ++j) m[r * N + j] -= f * m[k * N + j];
+                    for (Index j = k; j < N; ++j) m[r * N + j] -= f * m[k * N + j];
                 }
                 result *= pivot;
             }
@@ -312,20 +312,20 @@ inline void print_device_info() {
 // ---------------------------------------------------------------------------
 template<>
 struct BackendTraits<Backend::GPU> {
-    template<typename T, int Cap>
+    template<typename T, Index Cap>
     class Storage {
         static_assert(Cap > 0, "fixed storage requires Cap > 0");
     public:
         Storage() : d_(sycl::malloc_shared<T>(static_cast<std::size_t>(Cap), gpu::queue())) {
-            for (int i = 0; i < Cap; ++i) d_[i] = T{0};
+            for (Index i = 0; i < Cap; ++i) d_[i] = T{0};
         }
         ~Storage() { if (d_) sycl::free(d_, gpu::queue()); }
 
         Storage(const Storage& o) : Storage() {
-            for (int i = 0; i < Cap; ++i) d_[i] = o.d_[i];
+            for (Index i = 0; i < Cap; ++i) d_[i] = o.d_[i];
         }
         Storage& operator=(const Storage& o) {
-            if (this != &o) for (int i = 0; i < Cap; ++i) d_[i] = o.d_[i];
+            if (this != &o) for (Index i = 0; i < Cap; ++i) d_[i] = o.d_[i];
             return *this;
         }
         Storage(Storage&& o) noexcept : d_(o.d_) { o.d_ = nullptr; }
@@ -381,8 +381,8 @@ struct BackendTraits<Backend::GPU> {
             T* nd = (n > 0) ? sycl::malloc_shared<T>(n, gpu::queue()) : nullptr;
             if (nd) {
                 const std::size_t m = std::min<std::size_t>(n, n_);
-                for (std::size_t i = 0; i < m; ++i) nd[i] = d_[i];
-                for (std::size_t i = m; i < n; ++i) nd[i] = T{0};
+                for (Index i = 0; i < m; ++i) nd[i] = d_[i];
+                for (Index i = m; i < n; ++i) nd[i] = T{0};
             }
             if (d_) sycl::free(d_, gpu::queue());
             d_ = nd;
@@ -392,7 +392,7 @@ struct BackendTraits<Backend::GPU> {
     private:
         void copyAlloc_(const Storage& o) {
             d_ = (n_ > 0) ? sycl::malloc_shared<T>(n_, gpu::queue()) : nullptr;
-            for (std::size_t i = 0; i < n_; ++i) d_[i] = o.d_[i];
+            for (Index i = 0; i < n_; ++i) d_[i] = o.d_[i];
         }
         T* d_ = nullptr;
         std::size_t n_ = 0;
@@ -400,33 +400,33 @@ struct BackendTraits<Backend::GPU> {
 
     // ---- 算子 (SYCL 内核) ----
     template<typename T>
-    static void add(const T* a, const T* b, T* out, int n) {
+    static void add(const T* a, const T* b, T* out, Index n) {
         gpu::vector_add<T>({a, static_cast<std::size_t>(n)},
                            {b, static_cast<std::size_t>(n)},
                            {out, static_cast<std::size_t>(n)});
     }
     template<typename T>
-    static void sub(const T* a, const T* b, T* out, int n) {
+    static void sub(const T* a, const T* b, T* out, Index n) {
         gpu::vector_sub<T>({a, static_cast<std::size_t>(n)},
                            {b, static_cast<std::size_t>(n)},
                            {out, static_cast<std::size_t>(n)});
     }
     template<typename T>
-    static void scale(T s, const T* v, T* out, int n) {
+    static void scale(T s, const T* v, T* out, Index n) {
         gpu::vector_scale<T>(s, {v, static_cast<std::size_t>(n)},
                              {out, static_cast<std::size_t>(n)});
     }
     template<typename T>
-    static void div(T s, const T* v, T* out, int n) {
+    static void div(T s, const T* v, T* out, Index n) {
         gpu::vector_divide_scalar<T>(s, {v, static_cast<std::size_t>(n)},
                                      {out, static_cast<std::size_t>(n)});
     }
     template<typename T>
-    static void negate(const T* v, T* out, int n) {
+    static void negate(const T* v, T* out, Index n) {
         gpu::vector_scale<T>(T{-1}, {v, static_cast<std::size_t>(n)},
                              {out, static_cast<std::size_t>(n)});
     }
-    template<typename T, int N>
+    template<typename T, Index N>
     static void mat_mul(const T* a, const T* b, T* c) {
         gpu::matrix_multiply<T, N>({a, std::size_t(N) * N},
                                    {b, std::size_t(N) * N},

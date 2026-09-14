@@ -1,9 +1,8 @@
 // GPU backend correctness test (SYCL kernels vs CPU Eigen-like reference).
 //
 // Compile ONLY with a SYCL compiler defining HLCL_GPU_ENABLED, e.g.:
-//   acpp --acpp-targets=omp -O2 -std=c++17 -DHLCL_GPU_ENABLED \
-//        -Icore/include -Icore/include/avbd/core \
-//        tests/test_gpu_core.cpp -o test_gpu_core
+//   acpp --acpp-targets=omp -O2 -std=c++17 -DHLCL_GPU_ENABLED
+//        -Icore/include tests/test_gpu_core.cpp -o test_gpu_core
 // Run: ./test_gpu_core
 //
 // Verifies, per type/size, that the Backend::GPU SYCL kernels match the CPU

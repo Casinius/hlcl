@@ -13,7 +13,7 @@ using namespace hlcl;
 
 namespace {
 
-template<typename T, int Size>
+template<typename T, hlcl::Index Size>
 double measure_copy_overhead(const Vector<T, Size, Backend::GPU>& v,
                               const std::vector<T>& host_ref,
                               int iterations) {
@@ -35,7 +35,7 @@ double measure_copy_overhead(const Vector<T, Size, Backend::GPU>& v,
     return elapsed / iterations;
 }
 
-template<typename T, int Rows, int Cols>
+template<typename T, hlcl::Index Rows, hlcl::Index Cols>
 double measure_copy_overhead(const Matrix<T, Rows, Cols, Backend::GPU>& m,
                               const std::vector<T>& host_ref,
                               int iterations) {
